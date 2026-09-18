@@ -1,0 +1,3272 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="lF4WcYzE0l77iwEG3dQtzl">
+<head data-page-node-id="yGfRG58Y4QrAYIVR0FffaX">
+<meta charset="UTF-8" data-page-node-id="gHB0k1HB9DrLCSkCDz54gw">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="yTnUPaKppp5sem6TaS2Kc7">
+<title>JSON &amp; SQL 可视化工具</title>
+<link rel="stylesheet" href="cm/codemirror.min.css" data-page-node-id="5ZMLIAsfczhcg6GljgV404">
+<link rel="stylesheet" href="cm/foldgutter.min.css" data-page-node-id="9rf3sDJggjO6U7xQuEEbhB">
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --border: #e3e6ea;
+    --text: #1f2328;
+    --muted: #6e7781;
+    --punc: #57606a;
+    --key: #0a6cce;
+    --string: #1a7f37;
+    --number: #b55300;
+    --boolean: #8250df;
+    --null: #8b949e;
+    --error-bg: #fff1f0;
+    --error-border: #ffccc7;
+    --error-text: #cf1322;
+    --accent: #2f6feb;
+    /* graph（结构图）专用：比通用 --border 深一档，保证框/网格在浅底上能分清 */
+    --g-canvas: #f8fbfd;
+    --g-canvas-line: #e6eef5;
+    --g-node-border: #c3d4e3;
+    --g-head-bg: #e7eff5;
+    --g-head-border: #cbdae8;
+    --g-line: #dce6ef;
+    --g-zebra: #f8fbfd;
+    --g-side-bg: #eff5fb;
+    --g-edge: #a9c2d6;
+    --g-edge-label: #5b6b7a;
+    --g-hover-border: #6f9ec2;
+    --g-row-hover: #e8f2fa;
+    /* 文字色：默认同色（中性），换配色表时按类型着色 */
+    --g-title: #a31515;
+    --g-key: #a31515;
+    --g-val: #1f2328;
+    --g-idx: #a31515;
+    --g-num: #098658;
+    --g-str: #0451a5;
+    --g-bool: #8250df;
+    --g-null: #6e7781;
+    --code-font: "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --ui-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: var(--ui-font);
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 16px; background: var(--panel);
+    border-bottom: 1px solid var(--border); flex: 0 0 auto;
+  }
+  header h1 { font-size: 14.5px; margin: 0; font-weight: 650; display: flex; align-items: center; gap: 7px; }
+  header h1 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; }
+  header .btn { padding: 4px 11px; }
+  header .spacer { flex: 1; }
+  .btn {
+    font: inherit; font-size: 13px; padding: 6px 12px;
+    border: 1px solid var(--border); background: #fff; color: var(--text);
+    border-radius: 7px; cursor: pointer; transition: all .15s ease;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn:active { transform: translateY(1px); }
+  .btn.tiny { font-size: 12px; padding: 4px 10px; }
+  .btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  main { flex: 1 1 auto; display: flex; min-height: 0; }
+  .pane { min-width: 0; display: flex; flex-direction: column; background: var(--panel); }
+  .pane.left { border-right: 1px solid var(--border); flex: 0 0 28.57%; }
+  .pane.right { position: relative; flex: 1 1 auto; --tree-font: 13px; }
+
+  /* vertical splitter (left / right) */
+  .splitter {
+    flex: 0 0 7px; cursor: col-resize; background: var(--bg);
+    position: relative; z-index: 6;
+  }
+  .splitter::after {
+    content: ""; position: absolute; left: 2px; top: 0; bottom: 0; width: 3px;
+    background: var(--border); border-radius: 3px;
+  }
+  .splitter:hover::after, .splitter.active::after { background: var(--accent); }
+
+  .pane-head {
+    display: flex; align-items: center; gap: 8px; padding: 9px 14px;
+    font-size: 12.5px; font-weight: 600; color: var(--muted);
+    border-bottom: 1px solid var(--border); background: #fafbfc; flex-wrap: nowrap;
+  }
+  .pane-head .ph-label { white-space: nowrap; }
+  .pane-head .badge {
+    margin-left: auto; font-weight: 500; font-size: 11.5px; padding: 2px 8px;
+    border-radius: 20px; background: #eef1f5; color: var(--muted);
+  }
+  .pane-head .badge.ok { background: #e6f6ec; color: #1a7f37; }
+  .pane-head .badge.err { background: var(--error-bg); color: var(--error-text); }
+  .pane-head .hint { font-weight: 400; font-size: 11px; color: #9aa3ad; }
+  .cmd-select {
+    font: inherit; font-size: 12.5px; padding: 4px 8px; margin-left: 8px;
+    border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--text);
+    cursor: pointer;
+  }
+  .cmd-select:hover { border-color: var(--accent); }
+  .cmd-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(47,111,235,.12); }
+
+  /* merged toolbar: 结构视图 + 模式 + 转义/导航 + 缩放 + 搜索 全部在一行 */
+  .tool-spacer { margin-left: auto; }
+  .search-box { display: flex; align-items: center; gap: 6px; }
+  .search-box.hidden { display: none; }
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; padding: 0; border: 1px solid var(--border);
+    background: #fff; color: var(--muted); border-radius: 7px; cursor: pointer;
+    transition: all .15s ease;
+  }
+  .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .icon-btn:active { transform: translateY(1px); }
+  .icon-btn svg { display: block; }
+  .mode-toggle { display: inline-flex; gap: 4px; margin-left: 8px; }
+  .icon-btn.active { border-color: var(--accent); color: var(--accent); background: #eef4ff; }
+
+  /* relationship graph view */
+  .graph-view {
+    flex: 1 1 auto; min-height: 0; display: none; overflow: hidden; position: relative; cursor: grab; touch-action: none;
+    background: var(--g-canvas); background-image:
+      linear-gradient(var(--g-canvas-line) 1px, transparent 1px), linear-gradient(90deg, var(--g-canvas-line) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .pane.right.mode-graph .output { display: none; }
+  .pane.right.mode-graph .graph-view { display: block; }
+  .graph-view svg { display: block; }
+
+  /* 节点框：对齐「列表模式」的表格样式（中性灰白配色，去掉类型彩色）
+     外框 / 表头 / 内部网格线用三档深浅拉开层次，保证在浅色画布上分得清 */
+  .gnode { cursor: grab; }
+  .gnode:active { cursor: grabbing; }
+  .gnode-rect { fill: #fff; }
+  /* 边框覆盖层：在节点全部内容之后最后绘制——竖表头浅底/斑马纹/hover 行等底色
+     不再盖住框线（此前底色贴边绘制会吃掉描边的内侧一半，框线看着粗细不一） */
+  .gnode-border { fill: none; stroke: var(--g-node-border); stroke-width: 1.3; pointer-events: none; }
+  .gnode-head { stroke: var(--g-head-border); stroke-width: 1; fill: var(--g-head-bg); }
+  .gnode-title { font: 600 12px var(--ui-font); fill: var(--g-title); user-select: none; pointer-events: none; }
+  .gnode-key { font: 600 11px var(--ui-font); fill: var(--g-key); user-select: none; pointer-events: none; }
+  .gnode-val { font: 11px var(--code-font); fill: var(--g-val); user-select: none; pointer-events: none; }
+  /* 数组合并框的竖表头（元素下标 [i]）与「另 N 项」溢出行 */
+  .gnode-idx { font: 600 10.5px var(--ui-font); fill: var(--g-idx); user-select: none; pointer-events: none; }
+  .gnode-val.more { fill: var(--g-idx); font-style: italic; }
+  .gnode-key.more { fill: var(--g-idx); font-style: italic; font-weight: 400; }
+  .grow-div { stroke: var(--g-line); stroke-width: 1; }
+  .grow-div.col { stroke: var(--g-line); }
+  /* 竖表头列 / 根节点键列的浅底：强调「横表头 + 竖表头」的表格结构 */
+  .gnode-side { fill: var(--g-side-bg); pointer-events: none; }
+  /* 行命中层：透明矩形只负责接收鼠标事件，且画在文字「下方」，
+     悬停高亮不会盖住这一行的字段名 / 值（文字统一 pointer-events:none 让事件穿透到本层） */
+  .gnode-row { fill: #fff; fill-opacity: 0; pointer-events: all; }
+  .gnode-row.clickable { cursor: grab; }
+  .gnode-row.clickable:hover { fill: var(--g-row-hover); fill-opacity: 1; }
+  /* 当前选中的字段行 / 数组元素行：强调色底（与 hover 的中性色区分） */
+  .gnode-row.hl-row { fill: rgba(47, 111, 235, .16); fill-opacity: 1; }
+  /* 单元格级高亮覆盖层（对象行值单元格 / 数组行命中列），由 JS 按 Node 几何动态插入 */
+  .cell-hl { fill: rgba(47, 111, 235, .16); pointer-events: none; }
+  /* 根节点纵向表格的偶数行底色（对齐 table.jtable tbody tr:nth-child(even)） */
+  .gnode-zebra { fill: var(--g-zebra); pointer-events: none; }
+  /* 数组/对象字段行：值列显示长度标识 [N] / {N}（中性色，不强调） */
+  .gnode-val.arr { font: 600 11px var(--code-font); fill: var(--g-val); }
+  .gnode-val.obj { font: 600 11px var(--code-font); fill: var(--g-val); }
+  /* 按值类型着色（默认与普通值同色，切配色表时才拉开） */
+  .gnode-val.t-num { fill: var(--g-num); }
+  .gnode-val.t-str { fill: var(--g-str); }
+  .gnode-val.t-bool { fill: var(--g-bool); }
+  .gnode-val.t-null { fill: var(--g-null); }
+  .gnode .gnode-border { transition: stroke-width .12s, stroke .12s; }
+  .gnode:hover .gnode-border { stroke-width: 1.8; stroke: var(--g-hover-border); }
+  /* 选中节点突出显示：加粗描边 + 蓝色光晕（drop-shadow 在 SVG 上各方向泛光） */
+  .gnode.selected .gnode-border { stroke-width: 2.6; stroke: var(--accent); filter: drop-shadow(0 0 3px rgba(47, 111, 235, .6)); }
+  .gedge { stroke: var(--g-edge); stroke-width: 1.5; fill: none; }
+  .gedge.seq { stroke: #788497; stroke-width: 1.3; stroke-dasharray: 5 3; }
+  .gedge-label { font: 10px var(--ui-font); fill: var(--g-edge-label); }
+  .gedge-label-bg { fill: var(--g-canvas); }
+  .gcollapse { cursor: pointer; }
+  .gcollapse circle { fill: #fff; stroke: #0a6cce; stroke-width: 1.4; transition: fill .12s, stroke .12s; }
+  .gcollapse:hover circle { fill: #eaf2fc; }
+  .gcollapse.closed circle { fill: #fff3e8; stroke: #e8590c; }
+  .gcollapse text { font: 700 11px var(--ui-font); fill: #0a6cce; user-select: none; }
+  .gcollapse.closed text { fill: #e8590c; }
+  /* 值高亮（markText，仅字段值、不含键名）：颜色对齐浏览器文本选中的高亮色 */
+  .cm-graph-hl { background: #b3d4fc !important; border-radius: 2px; }
+  /* 整行高亮（addLineClass 到 background）：覆盖行首缩进、行尾空白与整行行高，即「行的间距部分」 */
+  .cm-graph-hl-line { background: #b3d4fc !important; }
+  .search-box input {
+    font: inherit; font-size: 12.5px; padding: 5px 10px; width: 184px;
+    border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--text);
+  }
+  .search-box input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(47,111,235,.12); }
+  .search-count { font-size: 11px; color: var(--muted); min-width: 36px; text-align: right; }
+  .search-hit { background: #fff2a8 !important; border-radius: 3px; box-shadow: 0 0 0 1px #f0d35a; }
+
+  /* editor (CodeMirror) */
+  .editor-host { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  #editor { height: 100%; }
+  .CodeMirror {
+    height: 100%; font-family: var(--code-font); font-size: 13px; line-height: 1.6;
+    border: none;
+  }
+  .CodeMirror-gutters { background: #fafbfc; border-right: 1px solid var(--border); }
+  .CodeMirror-linenumber { color: #b3bac3; }
+
+  /* bigger fold / collapse icons */
+  .CodeMirror-foldgutter { width: 22px; }
+  .CodeMirror-foldgutter-open:after,
+  .CodeMirror-foldgutter-folded:after {
+    font-size: 16px !important;
+    line-height: 1.7 !important;
+    font-weight: 700;
+  }
+  .CodeMirror-foldgutter-open:after { color: var(--muted); }
+  .CodeMirror-foldgutter-folded:after { color: var(--accent); }
+
+  .cm-error { background: #ffd9d6 !important; color: var(--error-text) !important; border-radius: 2px; box-shadow: 0 0 0 1px #ffaaa3; }
+  .cm-string { color: var(--string); }
+  .cm-number { color: var(--number); }
+  .cm-atom { color: var(--boolean); }
+  .cm-property { color: var(--key); }
+  .cm-null { color: var(--null); }
+  .cm-keyword { color: #8250df; font-weight: 600; }
+  .cm-operator, .cm-punctuation { color: var(--punc); }
+  .cm-comment { color: var(--muted); font-style: italic; }
+  .cm-variable-2 { color: #0a6cce; }
+
+  /* error box */
+  .err-box {
+    display: none; flex: 0 0 auto; margin: 0; padding: 10px 14px;
+    background: var(--error-bg); border-top: 1px solid var(--error-border);
+    color: var(--error-text); font-size: 12.5px; font-family: var(--code-font);
+    line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+  }
+  .err-box.show { display: block; }
+
+  /* output (tree) */
+  .output {
+    flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px;
+    cursor: grab; font-size: var(--tree-font);
+  }
+  .output:active { cursor: grabbing; }
+  .output.dragging { user-select: none; cursor: grabbing; }
+  .placeholder { color: var(--muted); font-size: 13px; padding: 20px 4px; }
+  .root-label { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .root-label .type-badge {
+    display: inline-block; padding: 1px 8px; border-radius: 4px;
+    background: #eef1f5; color: var(--accent); font-weight: 600; margin-right: 6px;
+  }
+
+  /* tree */
+  .branch { margin: 1px 0; }
+  .branch-head {
+    display: flex; align-items: flex-start; gap: 4px; cursor: pointer;
+    padding: 1px 0; border-radius: 4px; user-select: none;
+  }
+  .branch-head:hover { background: #f3f5f8; }
+  .toggle {
+    flex: 0 0 auto; width: 14px; text-align: center; color: var(--muted);
+    font-size: 11px; line-height: 1.6; transition: transform .12s ease;
+  }
+  .branch.collapsed .toggle { transform: rotate(-90deg); }
+  .branch-header { font-family: var(--code-font); font-size: var(--tree-font); line-height: 1.6; }
+  .branch-children { margin-left: 6px; padding-left: 14px; border-left: 1px dashed #dfe3e8; }
+  .branch.collapsed > .branch-children { display: none; }
+  .row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; font-family: var(--code-font); font-size: var(--tree-font); line-height: 1.6; padding: 1px 0; }
+  .key { color: var(--key); }
+  .punc { color: var(--punc); }
+  .count { color: var(--muted); font-style: italic; }
+  .leaf { font-family: var(--code-font); font-size: var(--tree-font); }
+  .leaf.string { color: var(--string); white-space: pre-wrap; }
+  .leaf.number { color: var(--number); }
+  .leaf.boolean { color: var(--boolean); }
+  .leaf.null { color: var(--null); }
+  .nav-btn {
+    margin-left: auto; flex: 0 0 auto; border: 1px solid var(--border); background: #fff;
+    color: var(--muted); border-radius: 5px; font-size: 11px; line-height: 1; padding: 2px 5px; cursor: pointer;
+  }
+  .nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* table */
+  .table-wrap { margin: 4px 0; }
+  .table-label { font-family: var(--code-font); font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  table.jtable {
+    border-collapse: collapse; font-family: var(--code-font); font-size: var(--tree-font);
+    background: #fff;
+  }
+  table.jtable th, table.jtable td {
+    border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top;
+    white-space: nowrap;
+  }
+  table.jtable th { background: #f3f5f8; color: var(--text); font-weight: 600; position: sticky; top: 0; }
+  table.jtable tbody tr:nth-child(even) { background: #fafbfc; }
+  table.jtable tbody tr:hover { background: #eef3fb; }
+  table.jtable td.idx { text-align: center; color: var(--muted); background: #fafbfc; }
+
+  /* ---------- minimap / viewport-nav（悬浮于画布右上，独立于「当前元素」面板） ---------- */
+  .map-win {
+    position: absolute; top: 100px; right: 12px; width: 190px; z-index: 30;
+    background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(20,30,50,.16); font-size: 12px; overflow: hidden;
+  }
+  .map-win.hidden { display: none; }
+  .map-body { padding: 8px; }
+  /* 缩略图：长方形（宽 > 高），无标题栏 / 无视图信息行（信息在 title 悬浮提示里） */
+  .map-mini {
+    position: relative; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #e9edf2;
+    border: 1px solid var(--border); border-radius: 6px; overflow: hidden; cursor: grab;
+  }
+  .map-thumb {
+    position: absolute; left: 4px; right: 4px; top: 0; height: 40px;
+    background: rgba(47,111,235,.16); border: 1.5px solid var(--accent); border-radius: 3px;
+    cursor: grab;
+  }
+  .map-thumb:active { cursor: grabbing; background: rgba(47,111,235,.34); }
+
+  /* ---------- bottom selection (drill-down) panel ---------- */
+  .sel-panel {
+    flex: 0 0 auto; height: 320px; display: flex; flex-direction: column; min-height: 0;
+    border-top: 1px solid var(--border); background: #fff;
+  }
+  .sel-panel.hidden { display: none; }
+  .hidden { display: none !important; }
+  .sel-resize { height: 6px; cursor: ns-resize; background: #eef1f5; flex: 0 0 auto; }
+  .sel-resize:hover { background: #dde3ec; }
+  /* 面板头：标题 + 当前路径 + 前进/后退 + 收起/关闭 */
+  .sel-head {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 8px; height: 30px;
+    padding: 0 8px 0 10px; border-bottom: 1px solid var(--border); background: #f7f9fc;
+  }
+  .sel-head-title { flex: 0 0 auto; font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; }
+  .sel-head-path {
+    flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: var(--code-font); font-size: 11.5px; color: var(--accent);
+  }
+  .sel-head-actions { flex: 0 0 auto; display: flex; gap: 4px; }
+  /* 「–」收起：面板只剩标题栏一行 */
+  .sel-panel.min .sel-body, .sel-panel.min .sel-resize { display: none; }
+  .sel-panel.min { height: 30px !important; min-height: 0; }
+  .sel-title { font-weight: 600; color: var(--text); }
+  .col-path {
+    font-family: var(--code-font); font-size: 11px; color: var(--accent);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 6px;
+  }
+  .sel-body { flex: 1 1 auto; display: flex; min-height: 0; }
+  /* 多级下钻列容器：列数不限，超出宽度时横向滚动 */
+  .sel-cols { flex: 1 1 auto; min-width: 0; display: flex; overflow-x: auto; }
+  /* 正常列宽 = 除「最终值」外宽度的 1/3；数组元素列（[0] [1]…）= 1/2，即整体的 1/6 */
+  .sel-col { display: flex; flex-direction: column; min-height: 0; flex: 0 0 auto; width: calc(100% / 3); min-width: 96px; border-right: 1px solid var(--border); background: #fff; }
+  .sel-col.arr-col { width: calc(100% / 6); min-width: 60px; }
+  .sel-col-title { flex: 0 0 auto; font-size: 11px; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--border); background: #fafbfc; display: flex; align-items: center; gap: 4px; white-space: nowrap; overflow: hidden; }
+  .sel-col-scroll { flex: 1 1 auto; overflow: auto; padding: 7px; }
+  .sel-splitter { flex: 0 0 7px; cursor: col-resize; background: #eef1f5; position: relative; }
+  .sel-splitter::after {
+    content: ""; position: absolute; left: 2px; top: 0; bottom: 0; width: 3px;
+    background: var(--border); border-radius: 3px;
+  }
+  .sel-splitter:hover::after { background: var(--accent); }
+  /* nav 行：对齐 treease 底部结构选择的「名称 + 类型角标 + 展开箭头」行样式 */
+  .nav-item {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    border: none; border-bottom: 1px solid #f0f2f5; border-radius: 0; background: transparent;
+    padding: 6px 8px; font: inherit; font-family: var(--code-font); font-size: 12.5px;
+    cursor: pointer; color: var(--text);
+  }
+  .nav-item:hover { background: #f3f5f8; }
+  .nav-item.sel { background: #eef4ff; color: var(--accent); }
+  .nav-item.sel { border-bottom-color: #dbe7fb; }
+  .nav-item .ni-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-item .ni-badge { flex: 0 0 auto; font-size: 11px; color: var(--muted); }
+  .nav-item.sel .ni-badge { color: inherit; }
+  .nav-item .ni-chev { flex: 0 0 auto; width: 10px; text-align: right; color: #b3bac3; }
+  .nav-item:hover .ni-chev { color: var(--muted); }
+  .nav-item.sel .ni-chev { color: var(--accent); }
+  .nav-empty { color: var(--muted); font-size: 12.5px; padding: 8px 6px; }
+
+  .cb-actions { flex: 0 0 auto; display: flex; gap: 4px; }
+  .cb-btn {
+    width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+    font: inherit; font-size: 13px; line-height: 1; border: 1px solid var(--border);
+    background: #fff; color: var(--muted); border-radius: 5px; cursor: pointer;
+  }
+  .cb-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .cb-btn:disabled { opacity: .38; cursor: default; }
+  .sel-value {
+    flex: 0 0 260px; min-width: 180px; border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .sel-value-head {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border-bottom: 1px solid var(--border); background: #fafbfc;
+  }
+  .sel-value-head .sv-title { font-size: 11px; color: var(--muted); font-weight: 600; }
+  .sel-value-head #selReset { margin-left: auto; }
+  .sel-value-body {
+    flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;
+    padding: 10px 12px; overflow: auto;
+  }
+  .val-label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .val-label .type-badge {
+    display: inline-block; padding: 1px 7px; border-radius: 4px; background: #eef1f5; color: var(--accent); font-weight: 600;
+  }
+  .val-pre {
+    flex: 1 1 auto; overflow: auto; font-family: var(--code-font); font-size: var(--tree-font);
+    white-space: pre; background: #fafbfc; border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px; margin: 7px 0; color: var(--text);
+  }
+
+  @media (max-width: 760px) {
+    main { flex-direction: column; }
+    .pane.left { border-right: none; border-bottom: 1px solid var(--border); flex: 1 1 50%; }
+    .pane.right { flex: 1 1 50%; }
+    .splitter { display: none; }
+  }
+
+  /* sort modal */
+  .modal-mask { position: fixed; inset: 0; background: rgba(20,28,40,.42); display: flex; align-items: center; justify-content: center; z-index: 60; }
+  .modal-mask.hidden { display: none; }
+  .modal { width: 392px; max-width: 92vw; background: #fff; border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,.22); overflow: hidden; }
+  .modal-head { padding: 14px 18px; font-size: 14.5px; font-weight: 700; color: var(--text); border-bottom: 1px solid var(--border); }
+  .modal-body { padding: 16px 18px; }
+  .form-row { margin-bottom: 14px; }
+  .form-row label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+  .form-row label .opt { font-weight: 400; color: #9aa3ad; margin-left: 4px; }
+  .form-row input[type=text] { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 7px; color: var(--text); }
+  .form-row input[type=text]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(47,111,235,.12); }
+  .sort-target-info { margin-top: 7px; font-size: 12px; color: #1a7f37; }
+  .sort-target-info.bad { color: var(--error-text); }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+  .seg-btn { font: inherit; font-size: 13px; padding: 6px 16px; border: none; background: #fff; color: var(--text); cursor: pointer; }
+  .seg-btn + .seg-btn { border-left: 1px solid var(--border); }
+  .seg-btn.active { background: var(--accent); color: #fff; }
+  .modal-err { min-height: 16px; font-size: 12px; color: var(--error-text); }
+  .modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--border); background: #fafbfc; }
+
+  /* ---------- history modal ---------- */
+  .history-modal { width: 520px; max-width: 94vw; }
+  .modal-sub { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 6px; }
+  .history-list { max-height: 56vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+  .history-empty { color: var(--muted); font-size: 13px; padding: 12px 4px; text-align: center; }
+  .history-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: 8px; background: #fafbfc;
+    transition: border-color .12s, background .12s;
+  }
+  .history-item:hover { border-color: var(--accent); background: #f5f8ff; }
+  .history-item.current { border-color: var(--accent); background: #eef4ff; }
+  .history-item .hi-time { flex: 0 0 auto; font-size: 12px; color: var(--text); font-family: var(--code-font); }
+  .history-item .hi-mode { flex: 0 0 auto; font-size: 11px; padding: 1px 6px; border-radius: 10px; background: #e3e8ee; color: var(--muted); }
+  .history-item .hi-mode.sql { background: #fff3e8; color: #d9480f; }
+  .history-item .hi-mode.json { background: #e6f6ec; color: #1a7f37; }
+  .history-item .hi-meta { flex: 0 0 auto; font-size: 11px; color: var(--muted); font-family: var(--code-font); }
+  .history-item .hi-preview { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--code-font); }
+  .history-item .hi-actions { flex: 0 0 auto; display: flex; gap: 6px; }
+
+  /* ---------- app-level mode tabs (JSON / SQL) ---------- */
+  .app-mode-tabs { display: inline-flex; gap: 4px; margin-left: 12px; vertical-align: middle; }
+  .app-mode-tabs .app-tab {
+    font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid transparent;
+    background: transparent; color: var(--muted); border-radius: 6px; cursor: pointer;
+  }
+  .app-mode-tabs .app-tab:hover { color: var(--text); }
+  .app-mode-tabs .app-tab.active { background: #eef4ff; color: var(--accent); border-color: #d0e0fa; font-weight: 600; }
+
+  /* ---------- SQL formatter mode ---------- */
+  body.mode-sql .json-only { display: none !important; }
+  body:not(.mode-sql) .sql-only { display: none !important; }
+  body.mode-sql .pane-head .sql-toolbar { display: flex; }
+  body:not(.mode-sql) .pane-head .sql-toolbar { display: none; }
+  body.mode-sql .output, body.mode-sql .graph-view, body.mode-sql .sel-panel { display: none !important; }
+  body.mode-sql .sql-output { display: flex; }
+  body:not(.mode-sql) .sql-output { display: none; }
+
+  .sql-toolbar {
+    align-items: center; gap: 8px; flex-wrap: wrap; flex: 1 1 auto;
+  }
+  .sql-toolbar label { font-size: 12px; color: var(--muted); }
+  .sql-toolbar select {
+    font: inherit; font-size: 12.5px; padding: 4px 8px;
+    border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--text);
+  }
+  .sql-toolbar .btn { padding: 4px 11px; }
+  .sql-stats {
+    margin-left: auto; font-size: 11.5px; color: var(--muted); font-family: var(--code-font);
+    white-space: nowrap;
+  }
+  .sql-output {
+    flex: 1 1 auto; min-height: 0; overflow: hidden; background: #fff;
+    flex-direction: column;
+  }
+  .sql-output .placeholder { color: var(--muted); font-size: 13px; padding: 14px 16px; }
+  /* 有结果时隐藏占位提示，改为展示带高亮的 CodeMirror 只读视图 */
+  .sql-output.has-result .placeholder { display: none; }
+  .sql-result { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  .sql-result .CodeMirror { height: 100%; }
+</style>
+</head>
+<body data-page-node-id="BgOglCYFFbOWQluHDbAnHe">
+<header data-page-node-id="kApjAmusUf3tlt35WWDHaK">
+  <h1 data-page-node-id="FUYAAjAygf1ynfdySv1bth"><span class="dot" data-page-node-id="3LWNO8wcRF96w1JlykhH3B"></span>JSON &amp; SQL 可视化工具</h1>
+  <div class="app-mode-tabs" id="appModeTabs">
+    <button class="app-tab active" data-mode="json">JSON</button>
+    <button class="app-tab" data-mode="sql">SQL</button>
+  </div>
+  <div class="spacer" data-page-node-id="TlAQOHQDVVJEr2F3n0Y5cP"></div>
+  <button class="btn json-only" id="btn-sample" data-page-node-id="Rp72C5uQCB8NPmcXxSu5ZQ">示例</button>
+  <button class="btn json-only" id="btn-format" data-page-node-id="3BDzqW3hKFW2Qn9GnNmpgP">格式化</button>
+  <button class="btn" id="btn-history">历史</button>
+  <button class="btn" id="btn-clear" data-page-node-id="xFE29uDRHrn5qSEu8c7QdV">清空</button>
+</header>
+
+<main data-page-node-id="Sl7SIgWmqaEu5oyrRNPiqY">
+  <section class="pane left" data-page-node-id="ekLRA5aSbgQERCzN4u1nUJ">
+    <div class="pane-head" data-page-node-id="5oXyxbJHUELYiSJFBBib05">
+      <span class="json-only">JSON 输入</span>
+      <select id="cmdSelect" class="cmd-select json-only" data-page-node-id="cmdSel" title="对输入执行命令">
+        <option value="">Command</option>
+        <option value="format">Format</option>
+        <option value="minify">Minify</option>
+        <option value="compact">Compact</option>
+        <option value="sort">Sort</option>
+        <option value="unescape">Unescape</option>
+      </select>
+      <div class="sql-toolbar">
+        <label for="sqlSource">来源</label>
+        <select id="sqlSource" title="字符串来源格式">
+          <option value="php">PHP 字符串</option>
+          <option value="hibernate">Hibernate 原生日志</option>
+        </select>
+        <button class="btn tiny" id="btn-sql-parse" title="仅做转义还原 / 日志提取（不改排版）">解析</button>
+        <button class="btn tiny on" id="btn-sql-format" title="还原并格式化 SQL">格式化</button>
+        <span class="sql-stats" id="sqlInputStats"></span>
+      </div>
+      <span class="badge json-only" id="left-badge" data-page-node-id="rDydEp8ULjt8TLYgZoY5nE">等待输入</span>
+    </div>
+    <div class="editor-host" data-page-node-id="9yAV316A6AONFCDJuwTGcz">
+      <div id="editor" data-page-node-id="CFr5BJBy7RffjuwUYQaEGD"></div>
+    </div>
+    <div class="err-box" id="err-box" data-page-node-id="A7sM6NeM63AWULgcPSi82R"></div>
+  </section>
+
+  <div class="splitter" id="splitter" data-page-node-id="splitV"></div>
+
+  <section class="pane right" data-page-node-id="CLyUB8r3VDpCs539D8bJ8z">
+    <div class="pane-head right-toolbar" data-page-node-id="pXgGoa8jdEZzkl6q0MXUGU">
+      <span class="ph-label json-only" data-page-node-id="sv">结构视图</span>
+      <span class="ph-label sql-only">SQL 格式化结果</span>
+      <div class="mode-toggle json-only" id="modeToggle" data-page-node-id="mt">
+        <button class="icon-btn" id="btnModeList" title="列表视图" data-page-node-id="mtL">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <line x1="3" y1="4" x2="13" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="13" y2="12"/>
+          </svg>
+        </button>
+        <button class="icon-btn active" id="btnModeGraph" title="关系图视图（实体关联，类似 UML/ER 图）" data-page-node-id="mtG">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+            <circle cx="3.5" cy="4" r="2"/><circle cx="12.5" cy="5" r="2"/><circle cx="8" cy="12.5" r="2"/>
+            <line x1="5.2" y1="5.2" x2="7" y2="10.8"/><line x1="10.8" y1="6.2" x2="9" y2="10.8"/>
+          </svg>
+        </button>
+      </div>
+      <span class="sql-only sql-stats" id="sqlOutputStats"></span>
+      <span class="tool-spacer json-only"></span>
+      <button class="btn tiny json-only" id="btn-escape" title="切换字符串转义显示" data-page-node-id="wnFHMtOfpqhAjjnXGXLOxB">转义: 关</button>
+      <button class="btn tiny json-only" id="btn-style" title="缩略图导航" data-page-node-id="IdPHXLpnB3ssmMTFScVBjQ">导航</button>
+      <button class="icon-btn json-only" id="btn-zoom-out" title="缩小" data-page-node-id="zo">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <circle cx="7" cy="7" r="4.2"/><line x1="10.4" y1="10.4" x2="14" y2="14"/>
+          <line x1="5" y1="7" x2="9" y2="7"/>
+        </svg>
+      </button>
+      <button class="icon-btn json-only" id="btn-zoom-in" title="放大镜（放大）" data-page-node-id="zi">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <circle cx="7" cy="7" r="4.2"/><line x1="10.4" y1="10.4" x2="14" y2="14"/>
+          <line x1="7" y1="5" x2="7" y2="9"/><line x1="5" y1="7" x2="9" y2="7"/>
+        </svg>
+      </button>
+      <button class="icon-btn json-only" id="btn-search-toggle" title="搜索" data-page-node-id="sbT">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <circle cx="7" cy="7" r="4.4"/><line x1="10.5" y1="10.5" x2="14" y2="14"/>
+        </svg>
+      </button>
+      <div class="search-box hidden json-only" id="searchWrap" data-page-node-id="sb">
+        <input type="search" id="searchBox" placeholder="搜索…" data-page-node-id="sbIn">
+        <span class="search-count" id="searchCount" data-page-node-id="sbC"></span>
+      </div>
+      <span class="badge json-only" id="right-badge" data-page-node-id="QzWMPaGVoTBhatqSe9tCP7">—</span>
+    </div>
+    <div class="output" id="output" data-page-node-id="3oBNhb5fhXbhPYITdrVtv5">
+      <div class="placeholder" data-page-node-id="FgWjOOuNLL7g1YCg8x339V">在左侧粘贴 JSON 后，这里会显示图形化结构。数组会自动渲染为表格。点行号旁 ▾ 可折叠左侧代码块；点节点后的 ◎ 可在下方逐级查看。右上角「缩略图导航」显示当前视图在整页中的位置，可点击/拖动定位。</div>
+    </div>
+    <div class="graph-view" id="graphView" data-page-node-id="gV">
+      <div class="placeholder">在左侧粘贴 JSON 后，这里会显示实体关联图（类似 UML / 数据库 ER 图）。每个对象/数组为一个实体，键连接其下级实体，标量作为属性列在实体框内。</div>
+    </div>
+      <div class="sql-output" id="sqlOutput">
+      <div class="placeholder" id="sqlPlaceholder">在左侧粘贴 SQL 字符串后，点击「解析」或「格式化」查看结果。</div>
+      <div class="sql-result" id="sqlResult"></div>
+    </div>
+
+    <!-- 缩略图导航：独立悬浮于画布右上（与「当前元素」面板解耦，有数据即显示） -->
+    <div class="map-win" id="mapWin" style="display:none" title="缩略图导航：点击或拖动可定位视图">
+      <div class="map-body">
+        <div class="map-mini" id="mapMini">
+          <div class="map-thumb" id="mapThumb"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- bottom panel: 当前元素（选中节点/字段后才出现）| 数组元素 | 字段 | 最终值 -->
+    <div class="sel-panel hidden" id="selPanel" data-page-node-id="nJWx17rNkPihV3nuAbbvCL">
+      <div class="sel-resize" id="selResize" data-page-node-id="R2SBEHiVOdZtNGHRzXOUbc"></div>
+      <!-- 暂时注释掉面板头（标题/路径/前进后退/收起/关闭），腾出 JSON 展示面积；恢复时去掉本行注释
+      <div class="sel-head" id="selHead">
+        <span class="sel-head-title" id="selHeadTitle">当前元素</span>
+        <span class="sel-head-path" id="selHeadPath"></span>
+        <div class="sel-head-actions">
+          <button class="cb-btn" id="navBack" type="button" title="后退" aria-label="后退">‹</button>
+          <button class="cb-btn" id="navFwd" type="button" title="前进" aria-label="前进">›</button>
+          <button class="cb-btn" id="selMin" type="button" title="收起面板" aria-label="收起面板">–</button>
+          <button class="cb-btn" id="selClose" type="button" title="关闭当前元素" aria-label="关闭">×</button>
+        </div>
+      </div>
+      -->
+      <!-- 多级下钻列：第 1 列 = 根的条目，第 k+1 列 = 第 k 级选中条目的内容；超出宽度横向滚动 -->
+      <div class="sel-body" data-page-node-id="4RSRPLIDm4FIzACRDaiW0G">
+        <div class="sel-cols" id="selCols"></div>
+        <div class="sel-splitter" id="selSplitter" data-page-node-id="selSplit"></div>
+        <div class="sel-value" id="selValue" data-page-node-id="jH5CCm7o5k83sPQsi9bUrY">
+          <div class="sel-value-head">
+            <span class="sv-title">最终值</span>
+            <button class="btn tiny" id="selReset" data-page-node-id="cojRPt3OgMGVtw6it54GbD">重置</button>
+          </div>
+          <div class="sel-value-body" id="selValueBody"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 历史版本弹窗 -->
+  <div class="modal-mask hidden" id="historyMask">
+    <div class="modal history-modal" role="dialog" aria-modal="true">
+      <div class="modal-head">历史版本 <span class="modal-sub">（最近 30 条，点击可回滚）</span></div>
+      <div class="modal-body">
+        <div class="history-list" id="historyList"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn tiny" id="historyClear" type="button">清空历史</button>
+        <button class="btn tiny" id="historyCancel" type="button">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 排序弹窗 -->
+  <div class="modal-mask hidden" id="sortMask">
+    <div class="modal" id="sortModal" role="dialog" aria-modal="true">
+      <div class="modal-head">排序 JSON</div>
+      <div class="modal-body">
+        <div class="form-row">
+          <label>目标路径<span class="opt">（留空=根；如 channels；也可直接填字段名自动定位数组）</span></label>
+          <input type="text" id="sortPath" placeholder="例: channels" autocomplete="off" spellcheck="false">
+          <div class="sort-target-info" id="sortTargetInfo"></div>
+        </div>
+        <div class="form-row" id="sortFieldRow">
+          <label>排序字段<span class="opt">（数组元素为对象时按此字段值排序；留空=首字段）</span></label>
+          <input type="text" id="sortField" placeholder="例: overdueRate" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-row">
+          <label>顺序</label>
+          <div class="seg" id="sortOrder">
+            <button type="button" class="seg-btn active" data-order="1">升序 ↑</button>
+            <button type="button" class="seg-btn" data-order="-1">降序 ↓</button>
+          </div>
+        </div>
+        <div class="modal-err" id="sortErr"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn tiny" id="sortCancel" type="button">取消</button>
+        <button class="btn tiny on" id="sortApply" type="button">应用</button>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script src="cm/codemirror.min.js"></script>
+<script src="cm/javascript.min.js"></script>
+<script src="cm/foldcode.min.js"></script>
+<script src="cm/foldgutter.min.js"></script>
+<script src="cm/brace-fold.min.js"></script>
+<script src="cm/matchbrackets.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  const errBox = document.getElementById("err-box");
+  const output = document.getElementById("output");
+  const graphView = document.getElementById("graphView");
+  const rightPane = document.querySelector(".pane.right");
+  const leftBadge = document.getElementById("left-badge");
+  const rightBadge = document.getElementById("right-badge");
+  // 只切换状态类，保留 json-only 等模式类（否则会把 .json-only 一起覆盖掉，导致 SQL 模式下徽标可见）
+  function setBadge(e, text, state) {
+    e.textContent = text;
+    e.classList.remove("ok", "err");
+    if (state) e.classList.add(state);
+  }
+  const btnEscape = document.getElementById("btn-escape");
+  const selCols = document.getElementById("selCols");
+  const selValue = document.getElementById("selValue");
+  const selValueBody = document.getElementById("selValueBody");
+  const selHeadPath = document.getElementById("selHeadPath");
+  const btnSelMin = document.getElementById("selMin");
+  const btnSelClose = document.getElementById("selClose");
+  const btnNavBack = document.getElementById("navBack");
+  const btnNavFwd = document.getElementById("navFwd");
+
+  const appModeTabs = document.getElementById("appModeTabs");
+  const sqlSource = document.getElementById("sqlSource");
+  const sqlOutput = document.getElementById("sqlOutput");
+  const sqlResult = document.getElementById("sqlResult");
+  const sqlInputStats = document.getElementById("sqlInputStats");
+  const sqlOutputStats = document.getElementById("sqlOutputStats");
+  const btnSqlParse = document.getElementById("btn-sql-parse");
+  const btnSqlFormat = document.getElementById("btn-sql-format");
+  const historyMask = document.getElementById("historyMask");
+
+  const SAMPLE = {
+    "name": "订单同步系统",
+    "version": "2.4.1",
+    "enabled": true,
+    "retry": null,
+    "channels": [
+      { "id": "hrb", "name": "上海华瑞银行", "overdueRate": 0.032, "active": true, "note": "这是一个非常非常长的备注字段值，用于演示当某个字段的值过长时，在表格中显示会很不好看，因此把它放到下方‘当前选择’面板的最右侧专门展示。" },
+      { "id": "wx",  "name": "皖新融资租赁", "overdueRate": 0.018, "active": true, "note": "短备注" },
+      { "id": "aj",  "name": "安吉融资租赁", "overdueRate": 0.041, "active": false, "note": "另一段较长的说明文本，用于验证长字符串在右侧值区可滚动/换行查看。" }
+    ],
+    "config": {
+      "vintage": { "method": "MOB30+60+90+", "quarterly": true },
+      "db": { "host": "read-replica", "readonly": true }
+    },
+    "tags": ["vintage", "overdue", "sync"]
+  };
+
+  let showEscaped = false;
+  let currentData = undefined;
+  let mapUserOpen = true;
+  // 底部「当前元素」面板：关系图模式下需选中节点才出现；× 关闭内容（缩略图导航不受影响），– 收起整块面板
+  let selPanelClosed = false;
+  let selPanelMin = false;
+  let selPanelH = 0;          // 用户拖拽后的面板高度（0 = 用 CSS 默认 400px）
+  let graphMode = true;
+  let appMode = "json";
+  let graphSvg = null, graphBaseW = 0, graphBaseH = 0, graphScale = 1;
+  let treeFont = 13;
+
+  /* ---------- history ---------- */
+  const HISTORY_KEY = "jsonviz_history";
+  const HISTORY_MAX = 30;
+  const HISTORY_MAX_CHARS = 500000;
+  let historySnapshots = [];
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      if (raw) historySnapshots = JSON.parse(raw);
+    } catch (e) { historySnapshots = []; }
+    if (!Array.isArray(historySnapshots)) historySnapshots = [];
+  }
+  function saveHistoryToStorage() {
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(historySnapshots.slice(0, HISTORY_MAX))); }
+    catch (e) {}
+  }
+  function formatHistoryTime(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    const MM = String(d.getMonth() + 1).padStart(2, "0");
+    const DD = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return MM + "-" + DD + " " + hh + ":" + mm;
+  }
+  function formatSizeSimple(b) {
+    if (b < 1024) return b + " B";
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + " KB";
+    return (b / 1024 / 1024).toFixed(1) + " MB";
+  }
+  function addHistorySnapshot() {
+    const text = editor.getValue();
+    if (!text) return;
+    if (text.length > HISTORY_MAX_CHARS) return;
+    if (historySnapshots.length && historySnapshots[0].text === text) return;
+    historySnapshots.unshift({
+      id: Date.now(),
+      time: new Date().toISOString(),
+      mode: appMode,
+      text: text
+    });
+    if (historySnapshots.length > HISTORY_MAX) historySnapshots.pop();
+    saveHistoryToStorage();
+  }
+  loadHistory();
+
+  let historyTimer = null;
+  function scheduleHistorySnapshot() {
+    clearTimeout(historyTimer);
+    historyTimer = setTimeout(addHistorySnapshot, 1500);
+  }
+  function restoreHistory(id) {
+    const item = historySnapshots.find(function (h) { return h.id === id; });
+    if (!item) return;
+    editor.setValue(item.text);
+    setAppMode(item.mode);
+    closeHistoryModal();
+  }
+  function deleteHistoryItem(id) {
+    historySnapshots = historySnapshots.filter(function (h) { return h.id !== id; });
+    saveHistoryToStorage();
+    renderHistoryList();
+  }
+  function clearHistory() {
+    historySnapshots = [];
+    saveHistoryToStorage();
+    renderHistoryList();
+  }
+  function openHistoryModal() {
+    renderHistoryList();
+    historyMask.classList.remove("hidden");
+  }
+  function closeHistoryModal() { historyMask.classList.add("hidden"); }
+  function renderHistoryList() {
+    const list = document.getElementById("historyList");
+    list.innerHTML = "";
+    if (!historySnapshots.length) {
+      list.innerHTML = '<div class="history-empty">暂无历史版本。修改 JSON 或 SQL 内容后会自动保存快照。</div>';
+      return;
+    }
+    const currentText = editor.getValue();
+    const frag = document.createDocumentFragment();
+    historySnapshots.forEach(function (h) {
+      const item = el("div", "history-item");
+      if (h.text === currentText) item.classList.add("current");
+      const time = el("span", "hi-time", formatHistoryTime(h.time));
+      const mode = el("span", "hi-mode " + h.mode, h.mode.toUpperCase());
+      const bytes = new Blob([h.text]).size;
+      const meta = el("span", "hi-meta", formatSizeSimple(bytes));
+      const preview = el("span", "hi-preview", h.text.split("\n")[0].slice(0, 120));
+      const actions = el("div", "hi-actions");
+      const btnRestore = el("button", "btn tiny", "回滚");
+      btnRestore.type = "button";
+      btnRestore.addEventListener("click", function () { restoreHistory(h.id); });
+      const btnDel = el("button", "btn tiny", "删除");
+      btnDel.type = "button";
+      btnDel.addEventListener("click", function () { deleteHistoryItem(h.id); });
+      actions.appendChild(btnRestore);
+      actions.appendChild(btnDel);
+      item.appendChild(time);
+      item.appendChild(mode);
+      item.appendChild(meta);
+      item.appendChild(preview);
+      item.appendChild(actions);
+      frag.appendChild(item);
+    });
+    list.appendChild(frag);
+  }
+
+  /* ---------- MySQL syntax highlighting (lightweight CodeMirror mode) ---------- */
+  (function () {
+    if (CodeMirror.modes && CodeMirror.modes.mysql) return;
+    const keywords = ("SELECT FROM WHERE ORDER BY GROUP HAVING JOIN LEFT RIGHT INNER OUTER FULL " +
+      "ON AS AND OR NOT IN IS NULL TRUE FALSE LIKE BETWEEN EXISTS CASE WHEN THEN ELSE END " +
+      "UNION ALL DISTINCT LIMIT OFFSET INSERT INTO VALUES UPDATE SET DELETE CREATE TABLE " +
+      "DROP ALTER INDEX PRIMARY KEY FOREIGN REFERENCES VIEW TRIGGER PROCEDURE FUNCTION DATABASE " +
+      "SHOW DESCRIBE EXPLAIN USE IF WITH RECURSIVE OVER PARTITION ROWS RANGE UNBOUNDED PRECEDING " +
+      "FOLLOWING CURRENT INTERVAL DESC ASC").split(/\s+/);
+    const kwSet = {};
+    keywords.forEach(function (k) { kwSet[k.toUpperCase()] = true; });
+    const ops = "=<>!+-*/%&|^~?:,.;";
+    CodeMirror.defineMode("mysql", function () {
+      return {
+        startState: function () { return {}; },
+        token: function (stream) {
+          if (stream.eatSpace()) return null;
+          const ch = stream.peek();
+          // comments
+          if (ch === "-" && stream.match(/^--/)) { stream.skipToEnd(); return "comment"; }
+          if (ch === "/" && stream.match(/^\/\*/)) { stream.skipToEnd(); return "comment"; }
+          // strings
+          if (ch === "'" || ch === '"') { stream.next(); let escaped = false; while (!stream.eol()) { const c = stream.next(); if (escaped) { escaped = false; } else if (c === "\\") { escaped = true; } else if (c === ch) break; } return "string"; }
+          // backtick identifiers
+          if (ch === "`") { stream.next(); while (!stream.eol()) { const c = stream.next(); if (c === "\\") { stream.next(); } else if (c === "`") break; } return "variable-2"; }
+          // numbers
+          if (/[\d.]/.test(ch) && stream.match(/^[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?/)) return "number";
+          // operators / punctuation
+          if (ops.indexOf(ch) !== -1) { stream.next(); return "operator"; }
+          if (/[();\[\]]/.test(ch)) { stream.next(); return "punctuation"; }
+          // word
+          if (stream.match(/^[a-zA-Z_$][a-zA-Z0-9_$]*/)) {
+            if (kwSet[stream.current().toUpperCase()]) return "keyword";
+            return null;
+          }
+          stream.next();
+          return null;
+        }
+      };
+    });
+    CodeMirror.defineMIME("text/x-mysql", "mysql");
+  })();
+
+  /* ---------- editor ---------- */
+  const editor = CodeMirror(document.getElementById("editor"), {
+    value: "",
+    mode: { name: "javascript", json: true },
+    lineNumbers: true,
+    matchBrackets: true,
+    foldGutter: true,
+    gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"],
+    foldOptions: { rangeFinder: CodeMirror.fold.brace }
+  });
+
+  // SQL 结果区：只读 CodeMirror（复用 mysql 高亮），随 SQL 模式显示
+  const sqlViewer = CodeMirror(sqlResult, {
+    value: "",
+    mode: "mysql",
+    readOnly: true,
+    lineNumbers: true,
+    lineWrapping: false,
+    viewportMargin: 40,
+    cursorBlinkRate: -1
+  });
+
+  let errorMarks = [];
+  function clearErrorMarks() {
+    errorMarks.forEach(function (m) { try { m.clear(); } catch (e) {} });
+    errorMarks = [];
+  }
+  function charToPos(text, pos) {
+    let line = 0, ch = 0;
+    const n = Math.min(pos, text.length);
+    for (let i = 0; i < n; i++) {
+      if (text[i] === "\n") { line++; ch = 0; } else ch++;
+    }
+    return { line: line, ch: ch };
+  }
+
+  /* ---------- helpers ---------- */
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function typeOf(v) {
+    if (v === null) return "null";
+    if (Array.isArray(v)) return "array";
+    if (typeof v === "object") return "object";
+    return typeof v;
+  }
+  function isContainer(v) { const t = typeOf(v); return t === "object" || t === "array"; }
+  function parseError(err, text) {
+    const msg = err && err.message ? err.message : String(err);
+    let pos = null;
+    let m = msg.match(/position\s+(\d+)/i);
+    if (m) pos = parseInt(m[1], 10);
+    if (pos == null) {
+      m = msg.match(/line\s+(\d+)\s+column\s+(\d+)/i);
+      if (m) {
+        const lines = text.split("\n");
+        let p = 0;
+        for (let i = 0; i < parseInt(m[1], 10) - 1 && i < lines.length; i++) p += lines[i].length + 1;
+        pos = p + (parseInt(m[2], 10) - 1);
+      }
+    }
+    return { msg: msg, pos: pos };
+  }
+
+  /* ---------- tree / table rendering ---------- */
+  function makeBranch(value, navLabel, headerHTML, childBuilder) {
+    const wrap = el("div", "branch");
+    const head = el("div", "branch-head");
+    const toggle = el("span", "toggle", "▾");
+    const header = el("span", "branch-header");
+    header.innerHTML = headerHTML;
+    head.appendChild(toggle);
+    head.appendChild(header);
+    if (navLabel != null) {
+      const nb = el("button", "nav-btn", "◎");
+      nb.title = "在下方导航中查看";
+      nb.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        openInNavigator(value, navLabel);
+      });
+      head.appendChild(nb);
+    }
+    const children = el("div", "branch-children");
+    childBuilder(children);
+    head.addEventListener("click", function () {
+      const collapsed = wrap.classList.toggle("collapsed");
+      toggle.textContent = collapsed ? "▸" : "▾";
+    });
+    wrap.appendChild(head);
+    wrap.appendChild(children);
+    return wrap;
+  }
+
+  function renderValue(value, label, opts) {
+    opts = opts || {};
+    if (value === null) return el("span", "leaf null", "null");
+    if (Array.isArray(value)) return renderArray(value, label, opts);
+    const t = typeof value;
+    if (t === "object") return renderObject(value, label, opts);
+    if (t === "string") {
+      if (showEscaped) return el("span", "leaf string", opts.noQuote ? value : JSON.stringify(value));
+      return el("span", "leaf string", opts.noQuote ? value : ('"' + value + '"'));
+    }
+    if (t === "number") return el("span", "leaf number", String(value));
+    if (t === "boolean") return el("span", "leaf boolean", String(value));
+    return el("span", "leaf", String(value));
+  }
+
+  function renderObject(obj, label, opts) {
+    const keys = Object.keys(obj);
+    return makeBranch(obj, label,
+      '<span class="punc">{</span> <span class="count">' + keys.length + ' 字段</span> <span class="punc">}</span>',
+      function (children) {
+        keys.forEach(function (k) {
+          const row = el("div", "row");
+          row.appendChild(el("span", "key", k + ":"));
+          row.appendChild(renderValue(obj[k], k, opts));
+          children.appendChild(row);
+        });
+      }
+    );
+  }
+
+  function isPlainObject(v) {
+    return v && typeof v === "object" && !Array.isArray(v) && v.constructor === Object;
+  }
+
+  function renderArray(arr, label, opts) {
+    const allObj = arr.length > 0 && arr.every(isPlainObject);
+    if (allObj) return renderTable(arr, label);
+    return makeBranch(arr, label,
+      '<span class="punc">[</span> <span class="count">' + arr.length + ' 项</span> <span class="punc">]</span>',
+      function (children) {
+        arr.forEach(function (v, i) {
+          const row = el("div", "row");
+          row.appendChild(el("span", "key", "[" + i + "]:"));
+          row.appendChild(renderValue(v, "[" + i + "]", opts));
+          children.appendChild(row);
+        });
+      }
+    );
+  }
+
+  function renderTable(arr, label) {
+    const cols = [];
+    const seen = new Set();
+    arr.forEach(function (o) {
+      Object.keys(o).forEach(function (k) { if (!seen.has(k)) { seen.add(k); cols.push(k); } });
+    });
+    const table = el("table", "jtable");
+    const thead = el("thead");
+    const trh = el("tr");
+    const thIdx = el("th", null, "序号");
+    thIdx.style.width = "46px"; thIdx.style.textAlign = "center";
+    trh.appendChild(thIdx);
+    cols.forEach(function (c) { trh.appendChild(el("th", null, c)); });
+    thead.appendChild(trh);
+    table.appendChild(thead);
+    const tbody = el("tbody");
+    arr.forEach(function (o, i) {
+      const tr = el("tr");
+      const tdIdx = el("td", "idx", String(i + 1));
+      tr.appendChild(tdIdx);
+      cols.forEach(function (c) {
+        const td = el("td");
+        const v = o[c];
+        if (v === undefined) td.appendChild(el("span", "leaf null", "—"));
+        else td.appendChild(renderValue(v, c, { noQuote: true }));
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+
+    const wrap = el("div", "table-wrap");
+    const lab = el("div", "table-label");
+    lab.innerHTML = '<span class="punc">[</span> <span class="count">' + arr.length + ' 行 · ' + cols.length + ' 列</span> <span class="punc">]</span>';
+    wrap.appendChild(lab);
+    wrap.appendChild(table);
+    const navBtn = el("button", "nav-btn", "◎ 在下方逐级查看");
+    navBtn.style.marginTop = "6px";
+    navBtn.style.display = "inline-block";
+    navBtn.title = "在下方导航中查看";
+    navBtn.addEventListener("click", function () { openInNavigator(arr, label); });
+    wrap.appendChild(navBtn);
+    return wrap;
+  }
+
+  function typeName(v) {
+    if (v === null) return "null";
+    if (Array.isArray(v)) return "Array(" + v.length + ")";
+    if (typeof v === "object") return "Object{" + Object.keys(v).length + "}";
+    return typeof v;
+  }
+
+  function renderTree(data) {
+    output.innerHTML = "";
+    const rootLabel = el("div", "root-label");
+    rootLabel.appendChild(el("span", "type-badge", typeName(data)));
+    rootLabel.appendChild(document.createTextNode("根节点"));
+    output.appendChild(rootLabel);
+    output.appendChild(renderValue(data, "根"));
+    refreshMinimap();
+  }
+
+  /* ---------- relationship graph view (entity/ER style) ---------- */
+  function formatScalar(v) {
+    if (v === null) return "null";
+    if (typeof v === "string") return showEscaped ? JSON.stringify(v) : v;
+    return String(v);
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c];
+    });
+  }
+  function truncate(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+
+  let graphNodes = [], graphEdges = [], graphRoot = null, graphSelectedId = null;
+  const collapsed = new Set();
+  const GN_W = 200, V_GAP = 30, MARGIN = 48, LEVEL_GAP = 92;
+  // 节点统一成「表格框」：不再有独立标题栏 / 元素名，表头方向按数据结构区分 ——
+  //   对象（含根节点）：表头「竖向」（左列 = 字段名，右列 = 值，每字段一行）
+  //   数组            ：表头「横向」（顶行 = 字段名，左列 = 元素下标 [i]）
+  // 数组合并框：横表头 = 字段名，竖表头 = 元素下标 [i]，其余为单元格
+  const T_HEAD_H = 24, T_ROW_H = 24, T_PAD_X = 8, T_MIN_COL = 52, T_MAX_COL = 180, T_ROW_CAP = 40, T_COL_CAP = 10;
+  // 对象框（含根节点）：字段竖向排列（每字段一行 key | value），标题栏高 / 行高 / 键列宽
+  const G_HEAD_H = 26, G_ROW_H = 22, G_KEY_W = 80;
+  const G_KEY_MIN = 52, G_KEY_MAX = 150, G_VAL_MIN = 108, G_VAL_MAX = 260;
+  function isRootNode(n) { return n === graphRoot; }
+  let panX = 0, panY = 0, worldW = 0, worldH = 0, graphRootG = null;
+
+  function buildGraph(data) {
+    graphNodes = []; graphEdges = [];
+    let nid = 0;
+    const CAP = 500;
+    function makeNode(label, kind) {
+      const n = { id: "n" + (nid++), label: label, kind: kind, attrs: [], children: [], x: 0, y: 0, w: GN_W, h: 0, subW: GN_W, value: undefined, seq: false, childCount: 0, userDX: 0, userDY: 0 };
+      graphNodes.push(n);
+      return n;
+    }
+    // 每条「父→子」边带一个稳定 key（父 id + 出口行 row）：同一字段行（如数组多个元素）
+    // 共享同一 key，因此一个开关即可收起/展开整行（含全部子元素）；
+    // to.parentEdge 供遍历时判断该子树是否被收起
+    function addEdge(from, to, label, fromRow) {
+      const e = { from: from, to: to, label: label, seq: false, fromRow: fromRow, key: from.id + "#" + fromRow };
+      graphEdges.push(e);
+      to.parentEdge = e;
+      return e;
+    }
+    // 单元格取值：标量直接显示；对象 / 数组只给长度标识 {N} / [N]（具体内容由子框展开）
+    function cellOf(v) {
+      const vt = typeOf(v);
+      if (vt === "array") return { text: "[" + v.length + "]", cls: "arr" };
+      if (vt === "object") return { text: "{" + Object.keys(v).length + "}", cls: "obj" };
+      return { text: formatScalar(v), cls: "", t: vt };
+    }
+    // 数组合并成「一个表格框」：横表头 = 各元素字段名（对象数组）或空（标量列表），
+    // 竖表头 = 元素下标 [i]，单元格 = 字段值。不再为每个元素单独建框、也不再显示 [i] 元素名。
+    function buildArray(arr, label, path) {
+      const node = makeNode(label, "array");
+      node.path = path;
+      node.childCount = arr.length;
+      const total = arr.length, shown = Math.min(total, T_ROW_CAP);
+      let objCnt = 0;
+      for (let i = 0; i < shown; i++) if (typeOf(arr[i]) === "object") objCnt++;
+      const asTable = shown > 0 && objCnt === shown;   // 元素全是对象 → 二维表（有横表头）
+      let cols = [], hiddenCols = 0;
+      if (asTable) {
+        const allKeys = [], seen = {};
+        for (let i = 0; i < shown; i++) {
+          Object.keys(arr[i]).forEach(function (k) {
+            if (!seen[k]) { seen[k] = 1; allKeys.push(k); }
+          });
+        }
+        if (allKeys.length > T_COL_CAP) {                // 字段过多：末列折成「…」并标出被折叠的字段数
+          hiddenCols = allKeys.length - (T_COL_CAP - 1);
+          cols = allKeys.slice(0, T_COL_CAP - 1).concat(["…"]);
+        } else {
+          cols = allKeys;
+        }
+      }
+      node.cols = cols;
+      node.hiddenCols = hiddenCols;
+      node.rows = [];
+      for (let i = 0; i < shown; i++) {
+        const row = { label: "[" + i + "]", path: path.concat(i), cells: [] };
+        if (asTable) cols.forEach(function (k) {
+          row.cells.push(k === "…" ? { text: "+" + hiddenCols, cls: "more" } : cellOf(arr[i][k]));
+        });
+        else row.cells.push(cellOf(arr[i]));
+        node.rows.push(row);
+      }
+      if (total > T_ROW_CAP) node.rows.push({ label: "", path: null, cells: [{ text: "另 " + (total - T_ROW_CAP) + " 项", cls: "more" }] });
+      if (node.rows.length === 0) node.rows.push({ label: "", path: null, cells: [{ text: "(空数组)", cls: "more" }] });
+      // 单元格里的对象 / 数组：各建子框，从所在元素行的右侧连出
+      if (asTable) {
+        for (let i = 0; i < shown && graphNodes.length < CAP; i++) {
+          cols.forEach(function (k) {
+            if (graphNodes.length >= CAP) return;
+            const v = arr[i][k], vt = typeOf(v);
+            if (vt === "array") {
+              const c = buildArray(v, k, path.concat(i, k));
+              addEdge(node, c, k, i);
+              node.children.push(c);
+            } else if (vt === "object") {
+              const c = makeNode(k, "object");
+              c.value = v; c.path = path.concat(i, k);
+              c.childCount = Object.keys(v).length;
+              fillObject(c, v, path.concat(i, k));
+              addEdge(node, c, k, i);
+              node.children.push(c);
+            }
+          });
+        }
+      }
+      return node;
+    }
+    // 对象：字段写进 attrs（横表头 + 值行），嵌套的数组 / 对象各自建子框
+    function fillObject(node, obj, path) {
+      Object.keys(obj).forEach(function (k) {
+        if (graphNodes.length >= CAP) return;
+        const v = obj[k], vt = typeOf(v);
+        if (vt === "array") {
+          node.attrs.push({ k: k, v: "[" + v.length + "]", arr: true });
+          const c = buildArray(v, k, path.concat(k));
+          addEdge(node, c, k, node.attrs.length - 1);
+          node.children.push(c);
+        } else if (vt === "object") {
+          node.attrs.push({ k: k, v: "{" + Object.keys(v).length + "}", obj: true });
+          const c = makeNode(k, "object");
+          c.value = v; c.path = path.concat(k);
+          c.childCount = Object.keys(v).length;
+          fillObject(c, v, path.concat(k));
+          addEdge(node, c, k, node.attrs.length - 1);
+          node.children.push(c);
+        } else {
+          node.attrs.push({ k: k, v: formatScalar(v), t: vt });
+        }
+      });
+      // 空对象：给一行占位，避免竖向表格框变成 0 高（无表头可显示）
+      if (node.attrs.length === 0) node.attrs.push({ k: "(空对象)", v: "", more: true });
+    }
+    const t = typeOf(data);
+    if (t === "object") {
+      graphRoot = makeNode("根", "object");
+      graphRoot.value = data; graphRoot.path = [];
+      graphRoot.childCount = Object.keys(data).length;
+      fillObject(graphRoot, data, []);
+    } else if (t === "array") {
+      // 根为数组：建一个根容器，数组本身合并成一个表格框挂在根下
+      graphRoot = makeNode("根", "object");
+      graphRoot.value = data; graphRoot.path = [];
+      graphRoot.childCount = data.length;
+      graphRoot.attrs.push({ k: "根", v: "[" + data.length + "]", arr: true });
+      const c = buildArray(data, "根", []);
+      addEdge(graphRoot, c, "", 0);
+      graphRoot.children.push(c);
+    } else {
+      graphRoot = makeNode("根", "scalar");
+      graphRoot.value = data; graphRoot.path = [];
+      graphRoot.attrs.push({ k: "值", v: formatScalar(data), t: t });
+    }
+  }
+
+  // 左→右布局：深度决定水平位置（越往右层级越低），兄弟节点沿垂直方向堆叠
+  function computeSubtree(n) {
+    if (n.children.length === 0) { n.subH = n.h; return n.subH; }
+    let h = 0;
+    n.children.forEach(function (c) { h += computeSubtree(c) + V_GAP; });
+    h -= V_GAP;
+    n.subH = Math.max(n.h, h);
+    return n.subH;
+  }
+  // 水平位置按层级(深度)决定：每层起点 = 上一层起点 + 上一层最宽节点 + 层间距，
+  // 这样合并后的表格框变宽也不会压到下一层
+  let depthX = [0];
+  function setX(n, depth) { n.x = depthX[depth] || 0; n.children.forEach(function (c) { setX(c, depth + 1); }); }
+  // 垂直位置：叶子自上而下堆叠，父节点居中于其子节点范围
+  function assignY(n, y0) {
+    n.y = y0 + (n.subH - n.h) / 2;
+    if (n.children.length === 0) return;
+    let cy = y0;
+    n.children.forEach(function (c) { assignY(c, cy); cy += c.subH + V_GAP; });
+  }
+
+  // 文本宽度粗估（中文按 1em、ASCII 按 0.56em），用于表格框列宽自适应
+  function textW(s, size) {
+    s = String(s);
+    let w = 0;
+    for (let i = 0; i < s.length; i++) w += (s.charCodeAt(i) > 255 ? 1 : 0.56) * size;
+    return w;
+  }
+  // 数组合并框的尺寸：竖表头列宽 + 各数据列宽（按表头 / 单元格文本自适应）
+  function layoutArrayNode(n) {
+    const hasHead = n.cols.length > 0;
+    const ncol = hasHead ? n.cols.length : 1;
+    const colW = [];
+    for (let c = 0; c < ncol; c++) {
+      let mx = hasHead ? textW(truncate(n.cols[c], 14), 11) : 0;
+      n.rows.forEach(function (r) {
+        if (r.cells[c]) mx = Math.max(mx, textW(truncate(r.cells[c].text, 14), 11));
+      });
+      colW.push(Math.max(T_MIN_COL, Math.min(T_MAX_COL, Math.ceil(mx) + T_PAD_X * 2)));
+    }
+    let lw = 26;
+    n.rows.forEach(function (r) { lw = Math.max(lw, Math.ceil(textW(r.label, 10.5)) + 12); });
+    // 数值列整列右对齐（表格惯例：数字靠右、文本靠左）
+    n.colAlignEnd = [];
+    for (let c = 0; c < ncol; c++) {
+      let allNum = true, any = false;
+      n.rows.forEach(function (r) {
+        const cell = r.cells[c];
+        if (!cell) return;
+        any = true;
+        if (cell.cls || !/^-?\d+(\.\d+)?$/.test(String(cell.text).trim())) allNum = false;
+      });
+      n.colAlignEnd.push(any && allNum);
+    }
+    n.labelW = Math.min(lw, 64);
+    n.colW = colW;
+    n.hasHead = hasHead;
+    n.w = n.labelW + colW.reduce(function (a, b) { return a + b; }, 0);
+    n.h = (hasHead ? T_HEAD_H : 0) + n.rows.length * T_ROW_H;
+  }
+  // 对象框（含根节点）的尺寸：左「竖表头」列宽（按字段名自适应）+ 右值列宽（按值文本自适应）
+  // 仅根节点多一条顶部标题栏；其余对象框没有标题栏，竖表头直接从框顶开始
+  function layoutObjectBox(n) {
+    const isRoot = isRootNode(n);
+    // 竖表头列宽：按最长字段名自适应（根节点下限 80，其余下限 52，上限统一 150）
+    let kx = isRoot ? G_KEY_W : G_KEY_MIN;
+    n.attrs.forEach(function (a) { kx = Math.max(kx, Math.ceil(textW(truncate(a.k, 14), 11)) + 18); });
+    const kw = Math.min(kx, G_KEY_MAX);
+    let vx = isRoot ? 170 : G_VAL_MIN;
+    n.attrs.forEach(function (a) { vx = Math.max(vx, Math.ceil(textW(truncate(a.v, 20), 11)) + 20); });
+    n.keyW = kw;
+    n.valW = Math.min(vx, G_VAL_MAX);
+    n.w = kw + n.valW;
+    n.h = (isRoot ? G_HEAD_H : 0) + Math.max(1, n.attrs.length) * G_ROW_H;
+  }
+  // 字段行几何：rowTop = 该框数据区顶部（根节点要让开标题栏、数组要让开横表头）；
+  // rowH = 行高（数组元素行用 T_ROW_H，对象字段行用 G_ROW_H）
+  function rowTopOf(n) {
+    if (isRootNode(n)) return n.y + G_HEAD_H;
+    if (n.kind === "array") return n.y + (n.hasHead ? T_HEAD_H : 0);
+    return n.y;
+  }
+  function rowHOf(n) { return n.kind === "array" ? T_ROW_H : G_ROW_H; }
+  // 值类型 → 着色 class（t-num / t-str / t-bool / t-null），供 .gnode-val.t-* 用
+  function tcls(t) {
+    return t === "number" ? " t-num" : t === "string" ? " t-str"
+      : t === "boolean" ? " t-bool" : t === "null" ? " t-null" : "";
+  }
+  // 顶部横表头条：仅上方两角圆角，底部平齐
+  function headBand(x, y, w, hh) {
+    return '<path class="gnode-head" d="M' + x + ',' + (y + 4) + ' a4,4 0 0 1 4,-4 h' + (w - 8) + ' a4,4 0 0 1 4,4 v' + (hh - 4) + ' h-' + w + ' z"/>';
+  }
+  // 对象框（根节点 / 普通对象）统一渲染：左「竖表头」列（字段名，浅底）+ 右值列，
+  // 每字段一行；根节点额外带顶部标题栏。与数组框的「横表头」形成区分。
+  function renderObjectBox(n) {
+    const isRoot = isRootNode(n);
+    const x = n.x, y = n.y, w = n.w, kw = n.keyW;
+    const bodyY = y + (isRoot ? G_HEAD_H : 0);
+    let s = '<rect class="gnode-rect object" x="' + x + '" y="' + y + '" width="' + w + '" height="' + n.h + '" rx="4"/>';
+    if (isRoot) {
+      s += headBand(x, y, w, G_HEAD_H);
+      s += '<text class="gnode-title" x="' + (x + 10) + '" y="' + (y + 17) + '">' + esc(truncate(n.label, 18)) + '</text>';
+      s += '<line class="grow-div" x1="' + x + '" y1="' + bodyY + '" x2="' + (x + w) + '" y2="' + bodyY + '"/>';
+    }
+    // 竖表头列浅底（字段名列），斑马纹只铺值列，避免互相覆盖；
+    // 竖表头列浅底（字段名列），斑马纹只铺值列，避免互相覆盖；
+    // 浅底从表头下沿一直延伸到框底，四周各留 1px 不与外框贴边
+    // （框线由 .gnode-border 最后统一绘制，底色也不戳出圆角）
+    const sideTop = bodyY + (bodyY <= y + 0.5 ? 1 : 0);
+    s += '<rect class="gnode-side" x="' + (x + 1) + '" y="' + sideTop + '" width="' + Math.max(0, kw - 1) + '" height="' + Math.max(0, y + n.h - 1 - sideTop) + '"/>';
+    n.attrs.forEach(function (a, i) {
+      const ry = bodyY + i * G_ROW_H;
+      if (i % 2 === 1) s += '<rect class="gnode-zebra" x="' + (x + kw) + '" y="' + ry + '" width="' + (w - kw - 1) + '" height="' + G_ROW_H + '"/>';
+      if (i > 0) s += '<line class="grow-div" x1="' + x + '" y1="' + ry + '" x2="' + (x + w) + '" y2="' + ry + '"/>';
+      s += '<line class="grow-div col" x1="' + (x + kw) + '" y1="' + ry + '" x2="' + (x + kw) + '" y2="' + (ry + G_ROW_H) + '"/>';
+      // 行命中层先画（在文字下方），悬停高亮才不会盖住内容
+      if (n.kind === "object") s += '<rect class="gnode-row clickable" data-key="' + esc(a.k) + '" x="' + x + '" y="' + ry + '" width="' + w + '" height="' + G_ROW_H + '"/>';
+      const ty = ry + G_ROW_H / 2 + 4;
+      s += '<text class="gnode-key' + (a.more ? " more" : "") + '" x="' + (x + 8) + '" y="' + ty + '">' + esc(truncate(a.k, 14)) + '</text>';
+      const vcls = a.arr ? " arr" : (a.obj ? " obj" : (a.more ? " more" : ""));
+      s += '<text class="gnode-val' + vcls + tcls(a.t) + '" x="' + (x + w - 10) + '" y="' + ty + '" text-anchor="end">' + esc(truncate(a.v, 20)) + '</text>';
+    });
+    // 边框覆盖层：最后绘制，保证四周框线粗细一致、不被底色盖住
+    s += '<rect class="gnode-border" x="' + x + '" y="' + y + '" width="' + w + '" height="' + n.h + '" rx="4"/>';
+    return s;
+  }
+  // 数组合并框：横表头（字段名）+ 竖表头（元素下标 [i]）+ 单元格
+  function renderArrayNode(n) {
+    const x = n.x, y = n.y, w = n.w;
+    const hasHead = n.hasHead, hh = hasHead ? T_HEAD_H : 0, lw = n.labelW;
+    let s = '<rect class="gnode-rect array" x="' + x + '" y="' + y + '" width="' + w + '" height="' + n.h + '" rx="4"/>';
+    if (hasHead) s += headBand(x, y, w, hh);
+    const bodyTop = y + hh;
+    const bodyBot = bodyTop + n.rows.length * T_ROW_H;
+    // 竖表头与数据列之间的分隔线
+    s += '<line class="grow-div col" x1="' + (x + lw) + '" y1="' + y + '" x2="' + (x + lw) + '" y2="' + bodyBot + '"/>';
+    // 各数据列的竖向网格
+    let gx = x + lw;
+    for (let c = 0; c < n.colW.length - 1; c++) {
+      gx += n.colW[c];
+      s += '<line class="grow-div col" x1="' + gx + '" y1="' + bodyTop + '" x2="' + gx + '" y2="' + bodyBot + '"/>';
+    }
+    if (hasHead) s += '<line class="grow-div" x1="' + x + '" y1="' + bodyTop + '" x2="' + (x + w) + '" y2="' + bodyTop + '"/>';
+    // 竖表头列浅底（元素下标列），斑马纹只铺数据列；内缩 1px 不与外框贴边
+    const sideFlushTop = (bodyTop <= y + 0.5);
+    const sideH = n.rows.length * T_ROW_H - (sideFlushTop ? 1 : 0) - (bodyBot >= y + n.h - 0.5 ? 1 : 0);
+    s += '<rect class="gnode-side" x="' + (x + 1) + '" y="' + (bodyTop + (sideFlushTop ? 1 : 0)) + '" width="' + Math.max(0, lw - 1) + '" height="' + sideH + '"/>';
+    n.rows.forEach(function (r, i) {
+      const ry = bodyTop + i * T_ROW_H;
+      if (i % 2 === 1) s += '<rect class="gnode-zebra" x="' + (x + lw) + '" y="' + ry + '" width="' + (w - lw - 1) + '" height="' + T_ROW_H + '"/>';
+      if (i > 0) s += '<line class="grow-div" x1="' + x + '" y1="' + ry + '" x2="' + (x + w) + '" y2="' + ry + '"/>';
+      // 行命中层先画（在文字下方），悬停高亮才不会盖住内容
+      if (r.path) s += '<rect class="gnode-row clickable" data-path="' + esc(JSON.stringify(r.path)) + '" x="' + x + '" y="' + ry + '" width="' + w + '" height="' + T_ROW_H + '"/>';
+      const ty = ry + T_ROW_H / 2 + 4;
+      if (r.label) s += '<text class="gnode-idx" x="' + (x + lw - 8) + '" y="' + ty + '" text-anchor="end">' + esc(r.label) + '</text>';
+      let cxp = x + lw;
+      r.cells.forEach(function (cell, ci) {
+        const cwid = n.colW[ci] || 0;
+        const end = n.colAlignEnd[ci];
+        const tx = end ? (cxp + cwid - T_PAD_X) : (cxp + T_PAD_X);
+        s += '<text class="gnode-val' + (cell.cls ? " " + cell.cls : "") + tcls(cell.t) + '" x="' + tx + '" y="' + ty + '"' + (end ? ' text-anchor="end"' : '') + '>' + esc(truncate(cell.text, 14)) + '</text>';
+        cxp += cwid;
+      });
+    });
+    if (hasHead) {
+      let hxp = x + lw;
+      const hy = y + hh / 2 + 4;
+      n.cols.forEach(function (k, ci) {
+        const cwid = n.colW[ci] || 0;
+        const end = n.colAlignEnd[ci];
+        const tx = end ? (hxp + cwid - T_PAD_X) : (hxp + T_PAD_X);
+        s += '<text class="gnode-key" x="' + tx + '" y="' + hy + '"' + (end ? ' text-anchor="end"' : '') + '>' + esc(truncate(k, 14)) + '</text>';
+        hxp += cwid;
+      });
+    }
+    // 边框覆盖层：最后绘制，保证四周框线粗细一致、不被底色盖住
+    s += '<rect class="gnode-border" x="' + x + '" y="' + y + '" width="' + w + '" height="' + n.h + '" rx="4"/>';
+    return s;
+  }
+  function renderNodeBox(n) {
+    if (n.kind === "array") return renderArrayNode(n);
+    return renderObjectBox(n);          // 根节点与普通对象共用「竖向表头」样式
+  }
+
+  function drawGraph() {
+    if (graphRoot === null) { graphSvg = null; graphRootG = null; worldW = 0; worldH = 0; return; }
+    graphNodes.forEach(function (n) {
+      if (n.kind === "array") layoutArrayNode(n);       // 数组：横表头 + 竖表头（下标）
+      else layoutObjectBox(n);                          // 对象（含根节点）：竖表头 + 值列
+    });
+    // 按层收集最宽节点，算出每一层的水平起点
+    const depthW = [];
+    (function measure(n, d) {
+      if (depthW[d] === undefined || n.w > depthW[d]) depthW[d] = n.w;
+      n.children.forEach(function (c) { measure(c, d + 1); });
+    })(graphRoot, 0);
+    depthX = [];
+    let dx = 0;
+    depthW.forEach(function (w) { depthX.push(dx); dx += w + LEVEL_GAP; });
+    computeSubtree(graphRoot);
+    assignY(graphRoot, 0);
+    setX(graphRoot, 0);
+    let maxX = 0;
+    graphNodes.forEach(function (n) { n.x += MARGIN + (n.userDX || 0); n.y += MARGIN + (n.userDY || 0); if (n.x + n.w > maxX) maxX = n.x + n.w; });
+    worldW = maxX + MARGIN;
+    worldH = graphRoot.subH + MARGIN * 2;
+
+    const visibleSet = new Set();
+    // 收起的字段行：该节点及其整棵子树（含自身框）整体不可见；否则递归展示子节点
+    (function collect(n, hidden) {
+      if (hidden) return;
+      visibleSet.add(n.id);
+      n.children.forEach(function (c) { collect(c, c.parentEdge && collapsed.has(c.parentEdge.key)); });
+    })(graphRoot, false);
+
+    let edges = "";
+    graphEdges.forEach(function (e) {
+      if (!visibleSet.has(e.from.id) || !visibleSet.has(e.to.id)) return;
+      const p = e.from, c = e.to;
+      if (e.seq) {
+        // 兄弟序列连线（垂直）：[i] 底部中点 → [i+1] 顶部中点
+        const x1 = p.x + p.w / 2, y1 = p.y + p.h, x2 = c.x + c.w / 2, y2 = c.y;
+        const my = (y1 + y2) / 2;
+        edges += '<path class="gedge seq" d="M' + x1 + ',' + y1 + ' C' + x1 + ',' + my + ' ' + x2 + ',' + my + ' ' + x2 + ',' + y2 + '"/>';
+      } else {
+        // 父子连线（水平）：从父框内「对应字段行」的右缘中点连出 → 子左侧中点
+        // （对象字段行 / 数组元素行都是「行」，只是行高与数据区起点不同）
+        const fr = (typeof e.fromRow === "number") ? e.fromRow : 0;
+        const rh = rowHOf(p);
+        const x1 = p.x + p.w;
+        const y1 = rowTopOf(p) + fr * rh + rh / 2;
+        const x2 = c.x, y2 = c.y + c.h / 2;
+        const mx = (x1 + x2) / 2, mid = (y1 + y2) / 2;
+        edges += '<path class="gedge" d="M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2 + '"/>';
+        if (e.label) {
+          const tw = esc(e.label).length * 6 + 10;
+          edges += '<rect class="gedge-label-bg" x="' + ((x1 + x2) / 2 - tw / 2) + '" y="' + (mid - 12) + '" width="' + tw + '" height="14" rx="3"/>';
+          edges += '<text class="gedge-label" x="' + ((x1 + x2) / 2) + '" y="' + (mid - 1) + '" text-anchor="middle">' + esc(e.label) + '</text>';
+        }
+      }
+    });
+    let nodes = "";
+    graphNodes.forEach(function (n) {
+      if (!visibleSet.has(n.id)) return;
+      const sel = (n.id === graphSelectedId) ? " selected" : "";
+      nodes += '<g class="gnode' + sel + '" data-id="' + n.id + '">';
+      nodes += renderNodeBox(n);
+      nodes += '</g>';
+    });
+    // 每个「有子节点的字段行」在其行尾部（父框右缘、该行中线）各画一个收起/展开小开关；
+    // 可折叠判定：同一出口行有多个子框，或唯一子框是「多行」的数组合并框。
+    // 单行数组合并框 / 单个对象框则不显示按钮（无可折叠内容）。
+    const edgeKeyCount = {};
+    graphEdges.forEach(function (e) { if (!e.seq) edgeKeyCount[e.key] = (edgeKeyCount[e.key] || 0) + 1; });
+    const drawnSwitchKeys = new Set();
+    graphEdges.forEach(function (e) {
+      if (e.seq) return;
+      const multiRow = (e.to && e.to.kind === "array" && e.to.rows.length > 1);
+      if (!multiRow && edgeKeyCount[e.key] === 1) {         // 子级仅 1 个元素：不显示按钮，并确保未被收起
+        collapsed.delete(e.key);
+        return;
+      }
+      if (!visibleSet.has(e.from.id)) return;              // 只要父字段可见就画开关（被收起的子框也需开关以便重新展开）
+      if (drawnSwitchKeys.has(e.key)) return;              // 同一字段列只画一个开关
+      drawnSwitchKeys.add(e.key);
+      const p = e.from;
+      const fr = (typeof e.fromRow === "number") ? e.fromRow : 0;
+      const rh = rowHOf(p);
+      // 开关固定在该字段行尾部（父框右缘、行的垂直中线）
+      const cy = rowTopOf(p) + fr * rh + rh / 2;
+      const cx = p.x + p.w + 9;
+      const open = !collapsed.has(e.key);
+      const ccls = open ? "open" : "closed";
+      nodes += '<g class="gcollapse ' + ccls + '" data-key="' + esc(e.key) + '">';
+      nodes += '<title>' + (open ? "收起该字段" : "展开该字段") + '</title>';
+      nodes += '<circle cx="' + cx + '" cy="' + cy + '" r="6"/>';
+      nodes += '<text x="' + cx + '" y="' + (cy + 3.6) + '" text-anchor="middle">' + (open ? "–" : "+") + '</text>';
+      nodes += '</g>';
+    });
+    graphView.innerHTML = '<svg id="graphSvg" width="' + graphView.clientWidth + '" height="' + graphView.clientHeight + '"><g id="graphRootG" transform="translate(' + panX + ',' + panY + ') scale(' + graphScale + ')">' + edges + nodes + '</g></svg>';
+    graphSvg = document.getElementById("graphSvg");
+    graphRootG = document.getElementById("graphRootG");
+    bindGraphNodeEvents();
+    applyGraphRowHighlight();        // 重绘（拖拽等）后恢复行级高亮
+    refreshMinimap();
+  }
+
+  function applyGraphTransform() {
+    if (graphRootG) graphRootG.setAttribute("transform", "translate(" + panX + "," + panY + ") scale(" + graphScale + ")");
+    refreshMinimap();
+  }
+
+  function fitGraph() {
+    const cw = graphView.clientWidth, ch = graphView.clientHeight;
+    if (!cw || !ch || worldW <= 0) return;
+    const pad = 56;
+    // 以「高度」为适配基准，横向不强行铺满视口 —— 当内容比视口宽时，
+    // 画布会超出视口、高亮框变窄，从而可用缩略图/拖拽左右平移
+    let s = (ch - pad) / worldH;
+    s = Math.max(0.2, Math.min(s, 1.6));
+    graphScale = s;
+    const sw = worldW * s, sh = worldH * s;
+    // 横向：内容比视口宽则左对齐（可向右拖拽平移），否则居中
+    panX = sw <= cw ? (cw - sw) / 2 : 0;
+    // 纵向：内容比视口高则顶部对齐（可向下拖拽），否则居中
+    panY = sh <= ch ? (ch - sh) / 2 : 0;
+    applyGraphTransform();
+  }
+
+  // 节点拖拽状态：左键按住任意节点框可自由移动；未移动则视为点击选中
+  let nodeDrag = null, redrawScheduled = false;
+  function selectGNode(gNode) {
+    if (graphSvg) graphSvg.querySelectorAll(".gnode").forEach(function (x) { x.classList.remove("selected"); });
+    if (gNode) gNode.classList.add("selected");
+  }
+  function selectGNodeById(id) {
+    if (!graphSvg) return;
+    graphSvg.querySelectorAll(".gnode").forEach(function (x) {
+      x.classList.toggle("selected", x.getAttribute("data-id") === id);
+    });
+  }
+  /* 画布中「当前选中的单元格 / 行」高亮（单元格精度）：
+     - 对象字段行存 { id, key } → 高亮该行的「值单元格」（keyW 右侧区域）
+     - 数组元素行存 { id, path } → 高亮整行（元素本身）
+     - 数组行内字段单元格存 { id, path, col } → 高亮该列单元格（labelW + colW 求偏移）
+     无选中时置 null。每次 drawGraph 重建 DOM 后需重新套用（覆盖层 rect 一并重建）。 */
+  let graphRowSel = null;
+  function applyGraphRowHighlight() {
+    if (!graphSvg) return;
+    graphSvg.querySelectorAll(".gnode-row.hl-row").forEach(function (r) { r.classList.remove("hl-row"); });
+    graphSvg.querySelectorAll("rect.cell-hl").forEach(function (r) { r.remove(); });
+    if (!graphRowSel) return;
+    const gNode = graphSvg.querySelector('.gnode[data-id="' + graphRowSel.id + '"]');
+    if (!gNode) { graphRowSel = null; return; }
+    const node = graphNodes.find(function (n) { return n.id === graphRowSel.id; });
+    let row = null;
+    if (graphRowSel.key !== undefined) {
+      gNode.querySelectorAll(".gnode-row[data-key]").forEach(function (r) {
+        if (!row && r.getAttribute("data-key") === graphRowSel.key) row = r;
+      });
+    } else if (graphRowSel.path) {
+      const p = graphRowSel.path;
+      gNode.querySelectorAll(".gnode-row[data-path]").forEach(function (r) {
+        if (row) return;
+        try {
+          const arr = JSON.parse(r.getAttribute("data-path"));
+          if (arr.length <= p.length && arr.every(function (v, i) { return String(v) === String(p[i]); })) row = r;
+        } catch (e) {}
+      });
+    }
+    if (!row) { graphRowSel = null; return; }
+    // 计算单元格区域；无单元格语义（元素整行）时直接整行高亮
+    let cell = null;
+    if (graphRowSel.key !== undefined && node) {
+      const rx = parseFloat(row.getAttribute("x")), ry = parseFloat(row.getAttribute("y"));
+      const rw = parseFloat(row.getAttribute("width")), rh = parseFloat(row.getAttribute("height"));
+      const kw = node.keyW || 0;
+      cell = { x: rx + kw, y: ry, w: rw - kw, h: rh };
+    } else if (graphRowSel.path && graphRowSel.col != null && node) {
+      const rx = parseFloat(row.getAttribute("x")), ry = parseFloat(row.getAttribute("y")), rh = parseFloat(row.getAttribute("height"));
+      let cx = rx + (node.labelW || 0);
+      for (let i = 0; i < graphRowSel.col; i++) cx += (node.colW[i] || 0);
+      cell = { x: cx, y: ry, w: (node.colW[graphRowSel.col] || 0), h: rh };
+    }
+    if (cell && cell.w > 0) {
+      const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      r.setAttribute("class", "cell-hl");
+      r.setAttribute("x", cell.x); r.setAttribute("y", cell.y);
+      r.setAttribute("width", cell.w); r.setAttribute("height", cell.h);
+      row.parentNode.insertBefore(r, row.nextSibling);
+    } else {
+      row.classList.add("hl-row");
+    }
+  }
+  function findGraphNodeByPath(segs) {
+    if (!segs) return null;
+    for (let i = 0; i < graphNodes.length; i++) {
+      const p = graphNodes[i].path;
+      if (!p || p.length !== segs.length) continue;
+      let same = true;
+      for (let j = 0; j < p.length; j++) if (String(p[j]) !== String(segs[j])) { same = false; break; }
+      if (same) return graphNodes[i];
+    }
+    return null;
+  }
+  // 把节点平移到画布视口中央（编辑器 / 下钻面板触发联动时用；画布点击不调用，节点本就在视野里）
+  function centerOnNode(node) {
+    if (!node || !graphRootG) return;
+    const cx = node.x + (node.userDX || 0) + node.w / 2;
+    const cy = node.y + (node.userDY || 0) + node.h / 2;
+    const cw = graphView.clientWidth, ch = graphView.clientHeight;
+    if (!cw || !ch) return;
+    panX = cw / 2 - cx * graphScale;
+    panY = ch / 2 - cy * graphScale;
+    applyGraphTransform();
+  }
+  // 选中 segs 对应节点（叶子字段 -> 其所在容器节点），可选居中；被折叠隐藏的节点不处理
+  function graphSelectBySegs(segs, center) {
+    if (!graphMode || !graphRoot) return false;
+    // 从完整路径逐级回退找最近的祖先节点（数组元素行没有独立节点框，需要回退到数组框）
+    let target = findGraphNodeByPath(segs);
+    let depth = segs ? segs.length : 0;
+    while (!target && depth > 0) {
+      depth--;
+      target = findGraphNodeByPath(segs.slice(0, depth));
+    }
+    if (!target) return false;
+    if (graphSvg && !graphSvg.querySelector('.gnode[data-id="' + target.id + '"]')) return false;
+    graphSelectedId = target.id;
+    selectGNodeById(target.id);
+    // 单元格级高亮：segs 比节点路径更深时，按末端语义细分
+    if (segs.length > depth) {
+      if (target.kind === "array") {
+        // 数组框：末端是元素内字段名 → 命中列单元格；是下标 → 元素整行
+        const extra = segs.slice(depth);
+        const ci = (target.cols || []).indexOf(String(extra[extra.length - 1]));
+        if (ci >= 0) graphRowSel = { id: target.id, path: segs.slice(0, segs.length - 1), col: ci };
+        else graphRowSel = { id: target.id, path: segs.slice() };
+      } else {
+        graphRowSel = { id: target.id, key: String(segs[segs.length - 1]) };
+      }
+    } else graphRowSel = null;
+    applyGraphRowHighlight();
+    if (center) centerOnNode(target);
+    return true;
+  }
+  // 关掉「–」收起态，让「当前元素」面板真正显示出来
+  function revealSelPanel() {
+    if (selPanelMin) setPanelMin(false);
+  }
+  function selectBox(node, gNode) {
+    graphSelectedId = node.id;
+    revealSelPanel();
+    if (node.path) { navigateToRootPath(node.path); highlightInEditor(node.path); }
+    selectGNode(gNode);
+    graphRowSel = null;              // 整框选中：清除行级高亮
+    applyGraphRowHighlight();
+    updatePanels();
+  }
+  // 画布平移：左键拖「空白画布」= 平移画布；左键拖「节点」= 移动该节点（节点 handler 已 stopPropagation，二者互斥）
+  let panState = null;
+  function scheduleRedraw() {
+    if (redrawScheduled) return;
+    redrawScheduled = true;
+    requestAnimationFrame(function () { redrawScheduled = false; if (nodeDrag) drawGraph(); });
+  }
+  graphView.addEventListener("pointerdown", function (e) {
+    if (e.button !== 0) return;
+    // 节点 handler 已 stopPropagation，这里只命中空白画布（svg 背景）
+    panState = { sx: e.clientX, sy: e.clientY, px: panX, py: panY, moved: false };
+    graphView.style.cursor = "grabbing";
+    try { graphView.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  function endPan(e) {
+    if (!panState) return;
+    panState = null;
+    graphView.style.cursor = "";
+    try { graphView.releasePointerCapture(e.pointerId); } catch (err) {}
+  }
+  graphView.addEventListener("pointerup", endPan);
+  graphView.addEventListener("pointercancel", endPan);
+  graphView.addEventListener("pointermove", function (e) {
+    if (panState) {
+      const dx = e.clientX - panState.sx, dy = e.clientY - panState.sy;
+      if (!panState.moved) { if (Math.hypot(dx, dy) < 3) return; panState.moved = true; }
+      panX = panState.px + dx; panY = panState.py + dy;
+      applyGraphTransform();
+      return;
+    }
+    if (!nodeDrag) return;
+    const dxs = e.clientX - nodeDrag.sx, dys = e.clientY - nodeDrag.sy;
+    if (!nodeDrag.moved) {
+      if (Math.hypot(dxs, dys) < 4) return;
+      nodeDrag.moved = true;
+    }
+    nodeDrag.node.userDX = nodeDrag.dx0 + dxs / graphScale;
+    nodeDrag.node.userDY = nodeDrag.dy0 + dys / graphScale;
+    scheduleRedraw();
+  });
+  function endNodeDrag(e) {
+    if (!nodeDrag) return;
+    const d = nodeDrag; nodeDrag = null;
+    try { graphView.releasePointerCapture(e.pointerId); } catch (err) {}
+    if (d.moved) { drawGraph(); return; }
+    // 未移动 = 点击：命中字段行则选中该字段，否则选中整个节点框
+    const node = d.node;
+    if (d.startKey && node.path) {
+      graphSelectedId = node.id;
+      revealSelPanel();
+      let fpath;
+      if (Array.isArray(d.startKey)) {
+        // 数组行：按点击 x 定位单元格（列 -> 字段）；索引列 / 未命中列 -> 整行（元素本身）
+        const rect = graphView.getBoundingClientRect();
+        const wx = (e.clientX - rect.left - panX) / graphScale;
+        const lw = node.labelW || 0;
+        let col = -1;
+        if (wx >= node.x + lw) {
+          let cx = node.x + lw;
+          for (let c = 0; c < (node.colW || []).length; c++) {
+            if (wx < cx + node.colW[c]) { col = c; break; }
+            cx += node.colW[c];
+          }
+        }
+        const fieldName = col >= 0 ? (node.cols || [])[col] : undefined;
+        if (fieldName !== undefined) {
+          fpath = d.startKey.concat([fieldName]);
+          graphRowSel = { id: node.id, path: d.startKey.slice(), col: col };
+        } else {
+          fpath = d.startKey.slice();
+          graphRowSel = { id: node.id, path: d.startKey.slice() };
+        }
+      } else {
+        fpath = node.path.concat(d.startKey);
+        graphRowSel = { id: node.id, key: String(d.startKey) };
+      }
+      highlightInEditor(fpath);
+      navigateToRootPath(fpath);
+      selectGNode(d.gNode);
+      applyGraphRowHighlight();
+      updatePanels();
+    } else {
+      selectBox(node, d.gNode);
+    }
+  }
+  graphView.addEventListener("pointerup", endNodeDrag);
+  graphView.addEventListener("pointercancel", endNodeDrag);
+
+  /* ---------- graph node interactions: 折叠开关 + 拖拽起点（每次重绘重新绑定） ---------- */
+  function bindGraphNodeEvents() {
+    if (!graphSvg) return;
+    // 折叠 / 展开：每个出口线独立开关（用 pointerdown + stopPropagation，
+    // 避免 graphView 的 setPointerCapture 抢走 click 导致开关失效）
+    graphSvg.querySelectorAll(".gcollapse").forEach(function (g) {
+      g.addEventListener("pointerdown", function (e) {
+        e.stopPropagation();
+        e.preventDefault();
+        const key = g.getAttribute("data-key");
+        if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
+        drawGraph();
+      });
+    });
+    // 节点框：左键按下即记为拖拽起点（是否真移动由 move 阈值判定；未移动则视为点击）
+    graphSvg.querySelectorAll(".gnode").forEach(function (gNode) {
+      gNode.addEventListener("pointerdown", function (e) {
+        if (e.button !== 0) return;
+        if (e.target.closest(".gcollapse")) { e.stopPropagation(); return; }
+        const node = graphNodes.find(function (n) { return n.id === gNode.getAttribute("data-id"); });
+        if (!node) return;
+        const rowEl = e.target.closest(".gnode-row.clickable");
+        // 对象节点行用 data-key（键名）；数组合并框的行走 data-path（元素下标数组）
+        let startKey = null;
+        if (rowEl) {
+          const dp = rowEl.getAttribute("data-path");
+          startKey = dp ? JSON.parse(dp) : rowEl.getAttribute("data-key");
+        }
+        nodeDrag = { node: node, gNode: gNode, sx: e.clientX, sy: e.clientY, dx0: node.userDX || 0, dy0: node.userDY || 0, moved: false, startKey: startKey };
+        try { graphView.setPointerCapture(e.pointerId); } catch (err) {}
+        e.stopPropagation();
+      });
+    });
+  }
+
+  /* ---------- graph selection -> left editor highlight ---------- */
+  let editorHLMarks = [];
+  let editorHLines = [];
+  function clearEditorHighlight() {
+    editorHLMarks.forEach(function (m) { try { m.clear(); } catch (e) {} });
+    editorHLMarks = [];
+    editorHLines.forEach(function (ln) { try { editor.removeLineClass(ln, "background", "cm-graph-hl-line"); } catch (e) {} });
+    editorHLines = [];
+  }
+  // 在原始 JSON 文本中定位某条 path（键名数组 / 索引数组），返回 {keyRange, valueRange}（字符偏移）
+  function findJsonPathRange(text, path) {
+    let i = 0;
+    const n = text.length;
+    const ws = function (c) { return c === " " || c === "\n" || c === "\r" || c === "\t"; };
+    function skip() { while (i < n && ws(text[i])) i++; }
+    function str() { // 解析字符串（i 在开引号处），推进到闭引号之后
+      i++;
+      while (i < n) { if (text[i] === "\\") { i += 2; continue; } if (text[i] === '"') { i++; break; } i++; }
+    }
+    function val() {
+      skip();
+      const c = text[i];
+      if (c === '"') { str(); return; }
+      if (c === '{') { obj([]); return; }
+      if (c === '[') { arr([]); return; }
+      if (c === 't' || c === 'f' || c === 'n') { while (i < n && /[a-z]/.test(text[i])) i++; return; }
+      while (i < n && /[-+0-9.eE]/.test(text[i])) i++;
+    }
+    function obj(steps) {
+      i++; skip();
+      if (text[i] === '}') { i++; return null; }
+      while (true) {
+        skip();
+        const ks = i; str(); const ke = i;
+        const keyVal = text.slice(ks + 1, ke - 1);
+        skip(); i++; // 冒号
+        skip();
+        if (steps.length && steps[0] === keyVal) {
+          const r = walk(steps.slice(1));
+          if (r && !r.keyRange) r.keyRange = [ks, ke];
+          return r;
+        }
+        val();
+        skip();
+        if (text[i] === ',') { i++; continue; }
+        if (text[i] === '}') { i++; break; }
+        break;
+      }
+      return null;
+    }
+    function arr(steps) {
+      i++; skip();
+      if (text[i] === ']') { i++; return null; }
+      let idx = 0;
+      while (true) {
+        skip();
+        if (steps.length && steps[0] === idx) { return walk(steps.slice(1)); }
+        val();
+        skip();
+        if (text[i] === ',') { i++; idx++; continue; }
+        if (text[i] === ']') { i++; break; }
+        break;
+      }
+      return null;
+    }
+    function walk(steps) {
+      skip();
+      const start = i;
+      const c = text[i];
+      if (c === '{') {
+        if (steps.length === 0) { val(); return { keyRange: null, valueRange: [start, i] }; }
+        return obj(steps);
+      }
+      if (c === '[') {
+        if (steps.length === 0) { val(); return { keyRange: null, valueRange: [start, i] }; }
+        return arr(steps);
+      }
+      const vs = i; val(); const ve = i;
+      if (steps.length === 0) return { keyRange: null, valueRange: [vs, ve] };
+      return null;
+    }
+    return walk(path);
+  }
+  function highlightInEditor(path) {
+    clearEditorHighlight();
+    let range;
+    if (!path || !path.length) {
+      const total = editor.getValue().length;
+      if (!total) return;
+      range = { valueRange: [0, total] };
+    } else {
+      range = findJsonPathRange(editor.getValue(), path);
+    }
+    if (!range || !range.valueRange) return;
+    // markText 仅覆盖字段「值」本身（不含键名），整行 addLineClass 覆盖行首缩进与行内空隙（含行间距）
+    const a = editor.posFromIndex(range.valueRange[0]);
+    const b = editor.posFromIndex(range.valueRange[1]);
+    editorHLMarks.push(editor.markText(a, b, { className: "cm-graph-hl" }));
+    for (let ln = a.line; ln <= b.line; ln++) {
+      editor.addLineClass(ln, "background", "cm-graph-hl-line");
+      editorHLines.push(ln);
+    }
+    editor.scrollIntoView({ from: a, to: b });
+  }
+
+  // 定位光标偏移所在的 JSON 路径（双击字段 / 值时用）。返回键 / 下标数组；
+  // 落在结构符号（花括号 / 冒号 / 逗号）或空白处时返回所属最内层容器的路径；根层级返回 []。
+  function findJsonPathAtOffset(text, off) {
+    let i = 0;
+    const n = text.length;
+    const ws = function (c) { return c === " " || c === "\n" || c === "\r" || c === "\t"; };
+    function skip() { while (i < n && ws(text[i])) i++; }
+    function str() { i++; while (i < n) { if (text[i] === "\\") { i += 2; continue; } if (text[i] === '"') { i++; break; } i++; } }
+    let result = null;
+    function val(stack) {
+      skip();
+      if (i >= n) return;
+      const c = text[i];
+      if (c === '"') {
+        const s = i; str(); const e = i;
+        if (!result && off >= s && off < e) result = stack.slice();
+        return;
+      }
+      if (c === '{') {
+        const os = i; i++; skip();
+        if (text[i] === '}') { i++; if (!result && off >= os && off < i) result = stack.slice(); return; }
+        while (true) {
+          skip();
+          const ks = i; str(); const ke = i;
+          const keyVal = (ke > ks + 1) ? text.slice(ks + 1, ke - 1) : "";
+          skip(); i++; skip(); // 冒号
+          if (!result && off >= ks && off < ke) result = stack.concat([keyVal]);
+          val(stack.concat([keyVal]));
+          skip();
+          if (text[i] === ',') { i++; continue; }
+          if (text[i] === '}') { i++; break; }
+          break;
+        }
+        if (!result && off >= os && off < i) result = stack.slice();
+        return;
+      }
+      if (c === '[') {
+        const os = i; i++; skip();
+        if (text[i] === ']') { i++; if (!result && off >= os && off < i) result = stack.slice(); return; }
+        let idx = 0;
+        while (true) {
+          skip();
+          val(stack.concat([idx]));
+          skip();
+          if (text[i] === ',') { i++; idx++; continue; }
+          if (text[i] === ']') { i++; break; }
+          break;
+        }
+        if (!result && off >= os && off < i) result = stack.slice();
+        return;
+      }
+      // 数字 / true / false / null
+      const s = i;
+      while (i < n && /[-+0-9.eEtTfFnlN]/.test(text[i])) i++;
+      const e = i;
+      if (!result && off >= s && off < e) result = stack.slice();
+    }
+    val([]);
+    return result;
+  }
+
+  // 由「当前元素」面板的 label 序列还原真实路径（数组下标 label 形如 "[i]"，对象字段用键名）
+  function pathSegsFromLabels(labels) {
+    const segs = [];
+    let cur = currentData;
+    for (let i = 0; i < labels.length; i++) {
+      const L = String(labels[i]);
+      if (Array.isArray(cur)) {
+        const m = /^\[(\d+)\]$/.exec(L);
+        if (!m) return null;
+        const idx = parseInt(m[1], 10);
+        if (idx >= cur.length) return null;
+        segs.push(idx); cur = cur[idx];
+      } else if (cur && typeof cur === "object") {
+        if (!Object.prototype.hasOwnProperty.call(cur, L)) return null;
+        segs.push(L); cur = cur[L];
+      } else return null;
+    }
+    return segs;
+  }
+
+  // 三向联动（编辑器 -> 面板 + 画布）：双击 JSON 输入中的字段 / 值，
+  // 下钻面板定位到该字段，画布选中并居中其所在节点框
+  editor.getWrapperElement().addEventListener("dblclick", function (e) {
+    if (e.target.closest(".CodeMirror-gutters")) return;
+    // 等 CodeMirror 先把双击产生的词选区落到光标上，再取位置
+    setTimeout(function () {
+      const pos = editor.getCursor("from");
+      const idx = editor.indexFromPos(pos);
+      const path = findJsonPathAtOffset(editor.getValue(), idx);
+      if (path === null) return;
+      highlightInEditor(path);
+      navigateToRootPath(path);
+      graphSelectBySegs(path, true);
+    }, 0);
+  });
+
+  function renderGraph(data) {
+    graphSelectedId = null;
+    graphSvg = null; graphRootG = null; collapsed.clear();
+    graphScale = 1; panX = 0; panY = 0;
+    if (currentData === undefined) {
+      graphView.innerHTML = '<div class="placeholder">在左侧粘贴 JSON 后，这里会显示实体关联图（类似 UML / 数据库 ER 图）。根实体在左侧，层级向右逐级展开（越往右层级越低）。每个对象/数组为一个实体，数组元素会被逐个拆出并用虚线按顺序竖向串联（第一个元素 → 最后一个元素），点击实体可在下方查看其内容。拖动可平移，滚轮可缩放。</div>';
+      refreshMinimap();
+      return;
+    }
+    buildGraph(data);
+    drawGraph();
+    fitGraph();
+  }
+
+  function renderMain(data) {
+    if (graphMode) renderGraph(data); else renderTree(data);
+  }
+
+  /* ---------- bottom navigator (4 columns: 数组元素 | 字段 | 最终值 | 缩略图) ---------- */
+  let navContext = undefined;
+  let navRootLabel = "根";
+  let rootSel = null;        // selected entry in 数组元素 column
+  let activePath = [];       // full path from root: [rootSel, ...deeper]
+  let leafSel = null;        // currently selected leaf field (final value) within the active container; stays on same 字段 column
+  let navHist = [], navHistIdx = -1, navApplying = false;   // 底部导航历史（前进 / 后退）
+
+  function entriesOf(value) {
+    if (Array.isArray(value)) {
+      return value.map(function (v, i) {
+        return { label: "[" + i + "]", key: "k" + i, value: v, type: typeOf(v) };
+      });
+    }
+    if (value && typeof value === "object") {
+      return Object.keys(value).map(function (k) {
+        return { label: k, key: "k" + k, value: value[k], type: typeOf(value[k]) };
+      });
+    }
+    return [];
+  }
+
+  function buildPathString() {
+    let s = navRootLabel;
+    activePath.forEach(function (p) { s += " › " + p.label; });
+    if (leafSel) s += " › " + leafSel.label;
+    return s;
+  }
+
+  function activeValue() {
+    return activePath.length ? activePath[activePath.length - 1].value : undefined;
+  }
+
+  /* ---- 底部面包屑 + 导航历史（前进 / 后退） ---- */
+  function navLabelPath() {
+    const p = activePath.map(function (x) { return x.label; }).join("/");
+    return navRootLabel + "|" + p + "|" + (leafSel ? leafSel.label : "");
+  }
+  function pushNavHistory() {
+    if (navApplying || navContext === undefined) return;
+    const snap = { navContext: navContext, navRootLabel: navRootLabel, rootSel: rootSel, activePath: activePath.slice(), leafSel: leafSel };
+    if (navHistIdx >= 0) {
+      const prev = navHist[navHistIdx];
+      const same = (prev.navRootLabel === snap.navRootLabel) &&
+        (prev.activePath.map(function (x) { return x.label; }).join("/") === snap.activePath.map(function (x) { return x.label; }).join("/")) &&
+        ((prev.leafSel && prev.leafSel.label) === (snap.leafSel && snap.leafSel.label || null)) &&
+        ((prev.rootSel && prev.rootSel.label) === (snap.rootSel && snap.rootSel.label || null));
+      if (same) { updateNavButtons(); return; }
+    }
+    navHist = navHist.slice(0, navHistIdx + 1);
+    navHist.push(snap);
+    if (navHist.length > 60) navHist.shift();
+    navHistIdx = navHist.length - 1;
+    updateNavButtons();
+  }
+  function applyNavSnapshot(s) {
+    navApplying = true;
+    navContext = s.navContext; navRootLabel = s.navRootLabel;
+    rootSel = s.rootSel; activePath = s.activePath.slice(); leafSel = s.leafSel;
+    renderNav();
+    navApplying = false;
+    updateNavButtons();
+  }
+  function navGo(delta) {
+    const t = navHistIdx + delta;
+    if (t < 0 || t >= navHist.length) return;
+    navHistIdx = t;
+    applyNavSnapshot(navHist[t]);
+  }
+  function updateNavButtons() {
+    if (btnNavBack) btnNavBack.disabled = (navHistIdx <= 0);
+    if (btnNavFwd) btnNavFwd.disabled = (navHistIdx >= navHist.length - 1);
+  }
+  // 行尾角标：容器显示长度 {N} / [N]，标量显示类型名（对齐 treease 的行角标）
+  function navBadgeText(ent) {
+    const v = ent.value;
+    if (Array.isArray(v)) return "[" + v.length + "]";
+    if (v && typeof v === "object") return "{" + Object.keys(v).length + "}";
+    return ent.type;
+  }
+
+  function makeNavItems(container, selectedLabel, onClick) {
+    const frag = document.createDocumentFragment();
+    const entries = entriesOf(container);
+    if (entries.length === 0) { frag.appendChild(el("div", "nav-empty", "（空）")); return frag; }
+    entries.forEach(function (ent) {
+      const item = el("button", "nav-item");
+      item.type = "button";
+      item.title = ent.label;
+      item.appendChild(el("span", "ni-label", ent.label));
+      // 角标规则（全部常显）：数组/对象显示元素数量 [N] / {N}，标量显示类型名 string / number…
+      item.appendChild(el("span", "ni-badge", navBadgeText(ent)));
+      const isContainer = (ent.type === "array" || ent.type === "object");
+      item.appendChild(el("span", "ni-chev", isContainer ? "›" : ""));
+      if (selectedLabel != null && ent.label === selectedLabel) item.classList.add("sel");
+      if (isContainer) item.classList.add("has-child");
+      item.addEventListener("click", function () { onClick(ent); });
+      frag.appendChild(item);
+    });
+    return frag;
+  }
+
+  // 最终值列：始终显示「当前选中节点」的内容 —— 容器给无美化/无缩进的紧凑 JSON，标量给原值
+  function valueDisplayText(v) {
+    if (v === undefined) return "";
+    if (isContainer(v)) return JSON.stringify(v);          // 无缩进、无美化
+    const t = typeOf(v);
+    if (t === "null") return "null";
+    if (t === "string") return showEscaped ? JSON.stringify(v) : v;
+    return String(v);
+  }
+
+  function showValueInPanel(v) {
+    selValueBody.innerHTML = "";
+    if (v === undefined) {
+      selValueBody.appendChild(el("div", "nav-empty", "在下方列中选择 元素 / 字段 后，这里显示其内容。"));
+      return;
+    }
+    const t = typeOf(v);
+    const label = el("div", "val-label");
+    label.appendChild(el("span", "type-badge", t));
+    selValueBody.appendChild(label);
+
+    const pre = el("pre", "val-pre");
+    const text = valueDisplayText(v);
+    pre.textContent = text;
+    selValueBody.appendChild(pre);
+    const copy = el("button", "btn tiny", isContainer(v) ? "复制 JSON" : "复制");
+    copy.addEventListener("click", function () { copyText(text, copy); });
+    selValueBody.appendChild(copy);
+  }
+
+  function copyText(text, btn) {
+    function done() { btn.textContent = "已复制"; setTimeout(function () { btn.textContent = btn._orig || "复制"; }, 1200); }
+    btn._orig = btn.textContent;
+    try { navigator.clipboard.writeText(text); done(); }
+    catch (e) {
+      const ta = document.createElement("textarea");
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); done(); } catch (e2) {}
+      ta.remove();
+    }
+  }
+
+  /* 多级下钻列：第 0 列 = 根条目；第 k 列 = activePath[k-1] 的内容。
+     每选中一级就多出一列，之前的列不隐藏；列数不限，超出宽度由 .sel-cols 横向滚动。 */
+  function renderNav() {
+    if (navContext === undefined) {
+      selCols.innerHTML = '<div class="nav-empty">解析 JSON 后，可在此逐级选择元素 / 字段，查看最终值。</div>';
+      selValueBody.innerHTML = "";
+      showValueInPanel(undefined);
+      if (selHeadPath) selHeadPath.textContent = "";
+      updateNavButtons();
+      return;
+    }
+    selCols.innerHTML = "";
+    // 第 k 列的点击：容器 -> 截断到该列并进入下一级；叶子 -> 截断到该列并选中该叶子
+    function clickEnt(k, ent) {
+      if (isContainer(ent.value)) {
+        activePath = activePath.slice(0, k).concat([ent]);
+        leafSel = null;
+      } else {
+        activePath = activePath.slice(0, k);
+        leafSel = ent;
+      }
+      rootSel = activePath.length ? activePath[0] : null;
+      renderNav();
+      // 三向联动（面板 -> 编辑器 + 画布）：由 label 序列还原真实路径
+      const labels = activePath.map(function (p) { return p.label; }).concat(leafSel ? [leafSel.label] : []);
+      const segs = pathSegsFromLabels(labels);
+      if (segs) {
+        highlightInEditor(segs);
+        graphSelectBySegs(segs, true);
+      }
+    }
+    function addCol(title, container, selectedLabel, k) {
+      // 数组容器（条目为 [0] [1]…）的列宽减半（.arr-col）
+      const col = el("div", "sel-col" + (Array.isArray(container) ? " arr-col" : ""));
+      col.appendChild(el("div", "sel-col-title", title));
+      const scroll = el("div", "sel-col-scroll");
+      scroll.appendChild(makeNavItems(container, selectedLabel, function (ent) { clickEnt(k, ent); }));
+      col.appendChild(scroll);
+      selCols.appendChild(col);
+    }
+    // 第 0 列：根（选中根下的叶子字段时 activePath 为空、选中项在 leafSel，也要高亮）
+    addCol(Array.isArray(navContext) ? "数组元素" : "字段", navContext,
+      activePath.length ? activePath[0].label : (leafSel ? leafSel.label : null), 0);
+    // 第 1..n 列：逐级下钻
+    activePath.forEach(function (p, i) {
+      addCol(p.label, p.value, (i + 1 < activePath.length ? activePath[i + 1].label : (leafSel ? leafSel.label : null)), i + 1);
+    });
+    // 新下钻的一级始终滚入视野
+    requestAnimationFrame(function () { selCols.scrollLeft = selCols.scrollWidth; });
+    // 最终值列：始终显示当前选中（叶子优先，其次最深层容器，最后是根）
+    const av = activeValue();
+    showValueInPanel(leafSel ? leafSel.value : (av !== undefined ? av : navContext));
+    // 当前路径（面板头暂时注释，元素存在时才更新）
+    if (selHeadPath) selHeadPath.textContent = buildPathString();
+    pushNavHistory();
+  }
+
+  function openInNavigator(value, rootLabel) {
+    // 换了一份数据（重新解析）时清空导航历史，避免持有旧对象引用
+    if (value !== navContext) { navHist = []; navHistIdx = -1; }
+    selPanelClosed = false;                 // 显式查看 -> 重新打开「当前元素」
+    navContext = value;
+    navRootLabel = rootLabel || "根";
+    rootSel = null;
+    activePath = [];
+    leafSel = null;
+    renderNav();
+    updatePanels();
+  }
+
+  // 从「全局根」出发按 path 逐级下钻：第一列高亮根下的当前字段，后续列展示下一级的当前字段
+  function navigateToRootPath(path) {
+    if (currentData === undefined) return;
+    selPanelClosed = false;                 // 选中节点/字段 -> 面板出现
+    navContext = currentData;
+    navRootLabel = "根";
+    rootSel = null;
+    activePath = [];
+    leafSel = null;
+    if (!path || !path.length) { renderNav(); updatePanels(); return; }
+    const rootEntries = entriesOf(currentData);
+    const r0 = rootEntries.find(function (e) { return String(e.label) === String(path[0]); });
+    if (r0) rootSel = r0;
+    let parent = currentData;
+    for (let i = 0; i < path.length; i++) {
+      const key = path[i];
+      if (!parent || typeof parent !== "object") break;
+      const cur = parent[key];
+      if (cur === undefined) break;
+      // label 与 entriesOf 保持一致：数组下标写成 [i]，对象字段用键名
+      const label = Array.isArray(parent) ? "[" + key + "]" : String(key);
+      const isLast = (i === path.length - 1);
+      if (!isLast || isContainer(cur)) activePath.push({ label: label, value: cur, type: typeOf(cur) });
+      else leafSel = { label: label, value: cur, type: typeOf(cur) };
+      parent = cur;
+    }
+    renderNav();
+    updatePanels();
+  }
+
+  /* ---------- main parse flow ---------- */
+  let timer = null;
+  function process() {
+    if (appMode !== "json") return;
+    clearTimeout(timer);
+    timer = setTimeout(doProcess, 220);
+  }
+  function doProcess() {
+    const text = editor.getValue();
+    clearErrorMarks();
+    clearEditorHighlight();
+    errBox.classList.remove("show");
+
+    if (text.trim() === "") {
+      setBadge(leftBadge, "等待输入", "");
+      setBadge(rightBadge, "—", "");
+      output.innerHTML = '<div class="placeholder">在左侧粘贴 JSON 后，这里会显示图形化结构。数组会自动渲染为表格。点行号旁 ▾ 可折叠左侧代码块；点节点后的 ◎ 可在下方逐级查看。右上角「缩略图导航」显示当前视图在整页中的位置，可点击/拖动定位。</div>';
+      currentData = undefined;
+      if (graphMode) graphView.innerHTML = '<div class="placeholder">JSON 为空，暂无可展示的关系图。</div>';
+      renderNav();
+      refreshMinimap();
+      updatePanels();
+      return;
+    }
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      const info = parseError(e, text);
+      setBadge(leftBadge, "格式错误", "err");
+      setBadge(rightBadge, "—", "");
+
+      let locText = "";
+      if (info.pos != null && text.length > 0) {
+        let p = info.pos;
+        if (p >= text.length) p = text.length - 1;
+        const lc = charToPos(text, p);
+        locText = "\n位置：第 " + (lc.line + 1) + " 行，第 " + (lc.ch + 1) + " 列";
+        const mark = editor.markText(
+          { line: lc.line, ch: lc.ch },
+          { line: lc.line, ch: lc.ch + 1 },
+          { className: "cm-error" }
+        );
+        errorMarks.push(mark);
+        editor.setCursor({ line: lc.line, ch: lc.ch });
+      }
+      errBox.textContent = "✗ JSON 解析失败：" + info.msg + locText;
+      errBox.classList.add("show");
+      output.innerHTML = '<div class="placeholder">JSON 存在错误，已在左侧用红色标出，请修正后重试。</div>';
+      currentData = undefined;
+      if (graphMode) graphView.innerHTML = '<div class="placeholder">JSON 解析失败，暂无可展示的关系图。</div>';
+      renderNav();
+      refreshMinimap();
+      updatePanels();
+      return;
+    }
+
+    currentData = data;
+    setBadge(leftBadge, "解析成功", "ok");
+    setBadge(rightBadge, typeName(data), "ok");
+    renderMain(data);
+    openInNavigator(data, "根");
+    updatePanels();
+    if (searchBox.value.trim()) runSearch(searchBox.value); else clearSearch();
+  }
+
+  /* ---------- drag to pan (output, both axes) ---------- */
+  let justDragged = false;
+  function enableDragScroll(elem) {
+    let down = false, moved = false, startX = 0, startY = 0, sl = 0, st = 0;
+    elem.addEventListener("pointerdown", function (e) {
+      if (e.button !== 0) return;
+      down = true; moved = false; startX = e.clientX; startY = e.clientY; sl = elem.scrollLeft; st = elem.scrollTop;
+    });
+    elem.addEventListener("pointermove", function (e) {
+      if (!down) return;
+      const dx = e.clientX - startX, dy = e.clientY - startY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        moved = true;
+        elem.classList.add("dragging");
+        if (e.cancelable) e.preventDefault(); // avoid selecting text while panning
+        elem.scrollLeft = sl - dx;            // horizontal pan
+        elem.scrollTop = st - dy;             // vertical pan
+      }
+    });
+    const end = function () {
+      if (down && moved) justDragged = true;  // swallow the click that follows a drag
+      down = false; moved = false; elem.classList.remove("dragging");
+    };
+    elem.addEventListener("pointerup", end);
+    elem.addEventListener("pointercancel", end);
+    // capture-phase: suppress the accidental click after a pan
+    elem.addEventListener("click", function (e) {
+      if (justDragged) { justDragged = false; e.stopPropagation(); e.preventDefault(); }
+    }, true);
+  }
+  enableDragScroll(output);
+
+  /* ---------- minimap / viewport navigation ---------- */
+  const mapWin = document.getElementById("mapWin");
+  const mapMini = document.getElementById("mapMini");
+  const mapThumb = document.getElementById("mapThumb");
+
+  function getMainView() { return graphMode ? graphView : output; }
+
+  // 当前可见节点的「实际内容边界」（含拖拽偏移），用于让缩略图高亮框与 JSON 真实大小一致
+  function getGraphContentBounds() {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    if (graphRoot) {
+      (function collect(n, hidden) {
+        if (hidden) return;
+        const x = n.x + (n.userDX || 0), y = n.y + (n.userDY || 0);
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x + n.w > maxX) maxX = x + n.w;
+        if (y + n.h > maxY) maxY = y + n.h;
+        n.children.forEach(function (c) { collect(c, c.parentEdge && collapsed.has(c.parentEdge.key)); });
+      })(graphRoot, false);
+    }
+    if (minX === Infinity) { minX = 0; minY = 0; maxX = worldW || 1; maxY = worldH || 1; }
+    return { minX: minX, minY: minY, maxX: maxX, maxY: maxY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+  }
+
+  /* 缩略图坐标系：把「画布世界坐标」线性映射到缩略图整块区域内（铺满），
+     —— 高亮框的定位与点击跳转共用同一套映射，保证两者始终一致 */
+  function miniWorldParams() {
+    const miniW = mapMini.clientWidth, miniH = mapMini.clientHeight;
+    const cb = getGraphContentBounds();
+    if (cb.w <= 0 || cb.h <= 0 || miniW <= 0 || miniH <= 0) return null;
+    return { miniW: miniW, miniH: miniH, cb: cb, sx: miniW / cb.w, sy: miniH / cb.h };
+  }
+  function worldToMiniX(wx, p) { return (wx - p.cb.minX) * p.sx; }
+  function worldToMiniY(wy, p) { return (wy - p.cb.minY) * p.sy; }
+  function miniToWorldX(mx, p) { return p.cb.minX + mx / p.sx; }
+  function miniToWorldY(my, p) { return p.cb.minY + my / p.sy; }
+
+  function updateMinimapThumb() {
+    const miniH = mapMini.clientHeight, miniW = mapMini.clientWidth;
+    if (currentData === undefined || miniH <= 0) {
+      mapThumb.style.left = "4px"; mapThumb.style.right = "4px"; mapThumb.style.width = "auto";
+      mapThumb.style.top = "0px"; mapThumb.style.height = miniH + "px";
+      mapWin.title = "缩略图导航：尚未解析"; return;
+    }
+    if (graphMode) {
+      const cw = graphView.clientWidth, ch = graphView.clientHeight;
+      const p = miniWorldParams();
+      if (!p || cw <= 0 || ch <= 0) {
+        mapThumb.style.left = "4px"; mapThumb.style.right = "4px"; mapThumb.style.width = "auto";
+        mapThumb.style.top = "0px"; mapThumb.style.height = miniH + "px";
+        mapWin.title = "缩略图导航：完整显示"; return;
+      }
+      const vw = cw / graphScale, vh = ch / graphScale;
+      const vLeft = -panX / graphScale, vTop = -panY / graphScale;
+      // 以「当前 JSON 实际内容边界」为缩略图世界范围，使高亮框大小与数据一致
+      let tw = vw * p.sx, th = vh * p.sy;
+      let tx = worldToMiniX(vLeft, p), ty = worldToMiniY(vTop, p);
+      tw = Math.max(6, Math.min(tw, miniW));
+      th = Math.max(6, Math.min(th, miniH));
+      tx = Math.max(0, Math.min(tx, miniW - tw));
+      ty = Math.max(0, Math.min(ty, miniH - th));
+      mapThumb.style.right = "auto"; mapThumb.style.left = tx + "px"; mapThumb.style.width = tw + "px";
+      mapThumb.style.top = ty + "px"; mapThumb.style.height = th + "px";
+      const pctX = Math.round((vLeft / p.cb.w) * 100), pctY = Math.round((vTop / p.cb.h) * 100);
+      mapWin.title = "缩略图导航：视图 X " + pctX + "% · Y " + pctY + "% · 缩放 " + Math.round(graphScale * 100) + "%";
+    } else {
+      const mv = output, sh = mv.scrollHeight, ch = mv.clientHeight;
+      if (sh <= ch || sh <= 0) {
+        mapThumb.style.left = "4px"; mapThumb.style.right = "4px"; mapThumb.style.width = "auto";
+        mapThumb.style.top = "0px"; mapThumb.style.height = miniH + "px";
+        mapWin.title = "缩略图导航：完整显示"; return;
+      }
+      const ratio = ch / sh, thumbH = Math.max(20, ratio * miniH);
+      const maxTop = miniH - thumbH, top = (mv.scrollTop / (sh - ch)) * maxTop;
+      mapThumb.style.right = "auto"; mapThumb.style.left = "4px"; mapThumb.style.width = "auto";
+      mapThumb.style.top = top + "px"; mapThumb.style.height = thumbH + "px";
+      const pctShown = Math.round(ratio * 100), posPct = Math.round(mv.scrollTop / (sh - ch) * 100);
+      mapWin.title = "缩略图导航：显示 " + pctShown + "% · 位置 " + posPct + "%";
+    }
+  }
+
+  function refreshMinimap() { updateMinimapThumb(); }
+
+  function updatePanels() {
+    const hasData = (currentData !== undefined);
+    // 「当前元素」只在选中节点 / 字段后出现（× 关闭后同样隐藏，点画布节点重新打开；
+    //   列表模式不受「未选中」限制）。缩略图导航独立于此面板，有数据即显示。
+    const noSel = hasData && (selPanelClosed || (graphMode && !graphSelectedId));
+    selPanel.classList.toggle("hidden", !hasData || noSel);
+    mapWin.style.display = (hasData && mapUserOpen) ? "" : "none";
+    selPanel.style.height = selPanelH ? selPanelH + "px" : "";
+    if (hasData && mapUserOpen) refreshMinimap();
+  }
+
+  // 「–」收起 / 「+」展开：只切类，高度交给内联样式（.min 用 !important 覆盖，展开即还原）
+  function setPanelMin(on) {
+    if (on === selPanelMin) return;
+    selPanelMin = on;
+    selPanel.classList.toggle("min", on);
+    if (btnSelMin) {
+      btnSelMin.textContent = on ? "+" : "–";
+      btnSelMin.title = on ? "展开面板" : "收起面板";
+      btnSelMin.setAttribute("aria-label", btnSelMin.title);
+    }
+  }
+
+  // 面板头暂时注释掉（selHead），按钮元素不存在 -> 全部判空，恢复 selHead 后无需改这里
+  if (btnSelMin) btnSelMin.addEventListener("click", function () {
+    setPanelMin(!selPanelMin);
+    updatePanels();
+    if (!selPanelMin) refreshMinimap();
+  });
+  if (btnSelClose) btnSelClose.addEventListener("click", function () {
+    selPanelClosed = true;
+    updatePanels();
+  });
+
+  let miniRebuildTimer = null;
+  function scheduleMinimapRebuild() {
+    clearTimeout(miniRebuildTimer);
+    miniRebuildTimer = setTimeout(refreshMinimap, 160);
+  }
+  output.addEventListener("click", scheduleMinimapRebuild);
+  output.addEventListener("scroll", updateMinimapThumb);
+
+  let mapDrag = false;
+  function mapSetFromClient(clientY, clientX) {
+    if (graphMode) {
+      const cw = graphView.clientWidth, ch = graphView.clientHeight;
+      const p = miniWorldParams();
+      const rect = mapMini.getBoundingClientRect();
+      if (!p || cw <= 0 || ch <= 0) return;
+      let mx = clientX - rect.left, my = clientY - rect.top;
+      mx = Math.max(0, Math.min(rect.width, mx));
+      my = Math.max(0, Math.min(rect.height, my));
+      const wx = miniToWorldX(mx, p), wy = miniToWorldY(my, p);
+      panX = cw / 2 - wx * graphScale;
+      panY = ch / 2 - wy * graphScale;
+      applyGraphTransform();
+    } else {
+      const mv = output, sh = mv.scrollHeight, ch = mv.clientHeight;
+      if (sh <= ch) return;
+      const rect = mapMini.getBoundingClientRect();
+      const miniH = rect.height;
+      const ratio = ch / sh, thumbH = ratio * miniH;
+      let top = clientY - rect.top - thumbH / 2;
+      top = Math.max(0, Math.min(top, miniH - thumbH));
+      mv.scrollTop = (top / (miniH - thumbH)) * (sh - ch);
+      updateMinimapThumb();
+    }
+  }
+  mapMini.addEventListener("pointerdown", function (e) {
+    mapDrag = true;
+    try { mapMini.setPointerCapture(e.pointerId); } catch (err) {}
+    mapSetFromClient(e.clientY, e.clientX);
+  });
+  mapMini.addEventListener("pointermove", function (e) {
+    if (!mapDrag) return;
+    mapSetFromClient(e.clientY, e.clientX);
+  });
+  function mapDragEnd() { mapDrag = false; }
+  mapMini.addEventListener("pointerup", mapDragEnd);
+  mapMini.addEventListener("pointercancel", mapDragEnd);
+
+  // (minimap is now a fixed column inside the bottom panel; header drag removed)
+
+  document.getElementById("btn-style").addEventListener("click", function () {
+    mapUserOpen = !mapUserOpen;
+    updatePanels();
+  });
+  // 列表 / 关系图 模式切换
+  const btnModeList = document.getElementById("btnModeList");
+  const btnModeGraph = document.getElementById("btnModeGraph");
+  function setMode(g) {
+    clearEditorHighlight();
+    graphMode = g;
+    rightPane.classList.toggle("mode-graph", g);
+    btnModeList.classList.toggle("active", !g);
+    btnModeGraph.classList.toggle("active", g);
+    if (currentData !== undefined) renderMain(currentData);
+    else {
+      graphView.innerHTML = '<div class="placeholder">在左侧粘贴 JSON 后，这里会显示实体关联图（类似 UML / 数据库 ER 图）。每个对象/数组为一个实体，数组元素会被逐个拆出并用连线按顺序排列，点击实体可在下方查看其内容。</div>';
+      refreshMinimap();
+    }
+    updatePanels();   // 关系图模式下未选中节点时，「当前元素」不出现
+  }
+  btnModeList.addEventListener("click", function () { setMode(false); });
+  btnModeGraph.addEventListener("click", function () { setMode(true); });
+  // 关系图滚轮缩放（以光标位置为锚点）
+  graphView.addEventListener("wheel", function (e) {
+    if (!graphMode || !graphSvg) return;
+    e.preventDefault();
+    const rect = graphView.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const factor = e.deltaY < 0 ? 1.12 : 0.89;
+    const ns = Math.max(0.2, Math.min(3, graphScale * factor));
+    panX = mx - (mx - panX) * (ns / graphScale);
+    panY = my - (my - panY) * (ns / graphScale);
+    graphScale = ns;
+    applyGraphTransform();
+  }, { passive: false });
+  // 按钮缩放：以视口中心为锚点（滚轮缩放以光标为锚点），上下限一致 0.2 ~ 3
+  function graphZoomStep(factor) {
+    if (!graphMode || !graphSvg) return;
+    const cw = graphView.clientWidth, ch = graphView.clientHeight;
+    const mx = cw / 2, my = ch / 2;
+    const ns = Math.max(0.2, Math.min(3, graphScale * factor));
+    if (ns === graphScale) return;
+    panX = mx - (mx - panX) * (ns / graphScale);
+    panY = my - (my - panY) * (ns / graphScale);
+    graphScale = ns;
+    applyGraphTransform();
+  }
+  function setTreeFont(px) {
+    treeFont = Math.max(10, Math.min(24, px));
+    rightPane.style.setProperty("--tree-font", treeFont + "px");
+  }
+  document.getElementById("btn-zoom-in").addEventListener("click", function () {
+    if (graphMode) graphZoomStep(1.2); else setTreeFont(treeFont + 1);
+  });
+  document.getElementById("btn-zoom-out").addEventListener("click", function () {
+    if (graphMode) graphZoomStep(1 / 1.2); else setTreeFont(treeFont - 1);
+  });
+
+  /* ---------- search (keys / values) ---------- */
+  const searchBox = document.getElementById("searchBox");
+  const searchCount = document.getElementById("searchCount");
+  let searchHits = [];
+  function clearSearch() {
+    searchHits.forEach(function (n) { n.classList.remove("search-hit"); });
+    searchHits = [];
+    searchCount.textContent = "";
+  }
+  function runSearch(q) {
+    clearSearch();
+    q = (q || "").trim().toLowerCase();
+    if (!q || currentData === undefined) return;
+    const targets = output.querySelectorAll(".key, .leaf");
+    targets.forEach(function (n) {
+      if (n.textContent.toLowerCase().indexOf(q) !== -1) {
+        n.classList.add("search-hit");
+        searchHits.push(n);
+      }
+    });
+    if (searchHits.length > 0) {
+      searchCount.textContent = "1/" + searchHits.length;
+      searchHits[0].scrollIntoView({ block: "center" });
+    } else {
+      searchCount.textContent = "0";
+    }
+  }
+  searchBox.addEventListener("input", function () { runSearch(this.value); });
+  const searchWrap = document.getElementById("searchWrap");
+  document.getElementById("btn-search-toggle").addEventListener("click", function () {
+    const hidden = searchWrap.classList.toggle("hidden");
+    if (!hidden) {
+      searchBox.focus();
+      if (searchBox.value.trim()) runSearch(searchBox.value);
+    } else {
+      clearSearch();
+    }
+  });
+  /* ---------- left / right splitter ---------- */
+  const splitter = document.getElementById("splitter");
+  const leftPane = document.querySelector(".pane.left");
+  let splDrag = false, splStartX = 0, splStartW = 0, splMax = 0;
+  splitter.addEventListener("pointerdown", function (e) {
+    splDrag = true; splStartX = e.clientX; splStartW = leftPane.getBoundingClientRect().width;
+    splMax = leftPane.parentElement.getBoundingClientRect().width;
+    splitter.classList.add("active");
+    try { splitter.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  });
+  splitter.addEventListener("pointermove", function (e) {
+    if (!splDrag) return;
+    let w = splStartW + (e.clientX - splStartX);
+    const minW = splMax * 0.2, maxW = splMax * 0.8;
+    w = Math.max(minW, Math.min(w, maxW));
+    leftPane.style.flexBasis = w + "px";
+  });
+  function splEnd() { splDrag = false; splitter.classList.remove("active"); }
+  splitter.addEventListener("pointerup", splEnd);
+  splitter.addEventListener("pointercancel", splEnd);
+
+  /* ---------- bottom panel: vertical resize (height) ---------- */
+  const selPanel = document.getElementById("selPanel");
+  document.getElementById("selResize").addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = selPanel.offsetHeight;
+    function onMove(ev) {
+      const dh = startY - ev.clientY;
+      let nh = startH + dh;
+      // 下限要容得下面板头(30) + 上级路径轨道(108) + 一段可用内容
+      nh = Math.max(220, Math.min(nh, rightPane.clientHeight * 0.78));
+      selPanelH = nh;
+      selPanel.style.height = nh + "px";
+      refreshMinimap();
+    }
+    function onUp() {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  });
+
+  /* ---------- bottom panel: horizontal splitter (cols vs value) ---------- */
+  const selSplitter = document.getElementById("selSplitter");
+  const selBody = document.querySelector(".sel-body");
+  let ssDrag = false, ssStartX = 0, ssStartW = 0, ssMax = 0;
+  selSplitter.addEventListener("pointerdown", function (e) {
+    ssDrag = true; ssStartX = e.clientX; ssStartW = selValue.getBoundingClientRect().width;
+    ssMax = selBody.getBoundingClientRect().width;
+    selSplitter.classList.add("active");
+    try { selSplitter.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  });
+  selSplitter.addEventListener("pointermove", function (e) {
+    if (!ssDrag) return;
+    let w = ssStartW + (ssStartX - e.clientX);
+    const minW = 180, maxW = selBody.getBoundingClientRect().width * 0.6;
+    w = Math.max(minW, Math.min(w, maxW));
+    selValue.style.flexBasis = w + "px";
+  });
+  function ssEnd() { ssDrag = false; selSplitter.classList.remove("active"); }
+  selSplitter.addEventListener("pointerup", ssEnd);
+  selSplitter.addEventListener("pointercancel", ssEnd);
+
+  document.getElementById("selReset").addEventListener("click", function () {
+    if (currentData !== undefined) openInNavigator(currentData, "根");
+  });
+
+  /* ---------- left command dropdown ---------- */
+  const cmdSelect = document.getElementById("cmdSelect");
+  function prettyPrint(indent) {
+    const text = editor.getValue().trim();
+    if (!text) return;
+    let d; try { d = JSON.parse(text); } catch (e) { doProcess(); return; }
+    editor.setValue(JSON.stringify(d, null, indent));
+  }
+  function cmdFormat() { prettyPrint(2); }
+  function cmdCompact() { prettyPrint(1); }
+  function cmdMinify() {
+    const text = editor.getValue().trim();
+    if (!text) return;
+    let d; try { d = JSON.parse(text); } catch (e) { doProcess(); return; }
+    editor.setValue(JSON.stringify(d));
+  }
+  /* ---------- sort (modal) ---------- */
+  function getByPath(root, path) {
+    if (!path) return root;
+    const segs = path.split(".");
+    let cur = root;
+    for (let i = 0; i < segs.length; i++) {
+      if (cur == null) return undefined;
+      const s = segs[i];
+      cur = (/^\d+$/.test(s)) ? cur[Number(s)] : cur[s];
+    }
+    return cur;
+  }
+  function setByPath(root, path, value) {
+    if (!path) return value;
+    const segs = path.split(".");
+    let cur = root;
+    for (let i = 0; i < segs.length - 1; i++) {
+      const s = segs[i];
+      cur = (/^\d+$/.test(s)) ? cur[Number(s)] : cur[s];
+      if (cur == null) return root;
+    }
+    const last = segs[segs.length - 1];
+    if (/^\d+$/.test(last)) cur[Number(last)] = value; else cur[last] = value;
+    return root;
+  }
+  // 深度优先找到第一个「对象数组」的路径（如 channels）
+  function findFirstArrayOfObjects(root) {
+    let found = null;
+    (function walk(v, p) {
+      if (found) return;
+      if (Array.isArray(v)) {
+        if (v.length && v[0] && typeof v[0] === "object" && !Array.isArray(v[0])) { found = p; return; }
+        v.forEach(function (it, i) { walk(it, p ? p + "." + i : "" + i); });
+      } else if (v && typeof v === "object") {
+        Object.keys(v).forEach(function (k) { walk(v[k], p ? p + "." + k : k); });
+      }
+    })(root, "");
+    return found;
+  }
+  // 找到「元素含某字段的对象数组」路径，用于把用户直接输入的字段名定位到数组
+  function findArrayByField(root, field) {
+    let found = null;
+    (function walk(v, p) {
+      if (found) return;
+      if (Array.isArray(v)) {
+        if (v.length && v[0] && typeof v[0] === "object" && !Array.isArray(v[0]) && (field in v[0])) { found = p; return; }
+        v.forEach(function (it, i) { walk(it, p ? p + "." + i : "" + i); });
+      } else if (v && typeof v === "object") {
+        Object.keys(v).forEach(function (k) { walk(v[k], p ? p + "." + k : k); });
+      }
+    })(root, "");
+    return found;
+  }
+  function firstObjField(arr) {
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] && typeof arr[i] === "object" && !Array.isArray(arr[i])) return Object.keys(arr[i])[0];
+    }
+    return "";
+  }
+  function cmpVals(av, bv) {
+    if (av === bv) return 0;
+    const an = av == null, bn = bv == null;
+    if (an && bn) return 0;
+    if (an) return 1;          // 空值放最后（升序视角）
+    if (bn) return -1;
+    if (typeof av === "number" && typeof bv === "number") return av - bv;
+    if (typeof av === "boolean" && typeof bv === "boolean") return (av ? 1 : 0) - (bv ? 1 : 0);
+    return String(av).localeCompare(String(bv), "zh");
+  }
+  function classify(v) {
+    if (v && typeof v === "object" && !Array.isArray(v)) return "obj";
+    if (Array.isArray(v)) {
+      if (v.length && v[0] && typeof v[0] === "object" && !Array.isArray(v[0])) return "arrObj";
+      return "arrScalar";
+    }
+    return "scalar";
+  }
+  function sortValue(target, kind, field, order) {
+    if (kind === "obj") {
+      const out = {};
+      Object.keys(target).sort(function (a, b) { return order * a.localeCompare(b, "zh"); })
+        .forEach(function (k) { out[k] = target[k]; });
+      return out;
+    }
+    if (kind === "arrObj") {
+      const f = field || firstObjField(target);
+      return target.slice().sort(function (a, b) { return order * cmpVals(a ? a[f] : undefined, b ? b[f] : undefined); });
+    }
+    return target.slice().sort(function (a, b) { return order * cmpVals(a, b); });
+  }
+
+  const sortMask = document.getElementById("sortMask");
+  const sortPath = document.getElementById("sortPath");
+  const sortField = document.getElementById("sortField");
+  const sortFieldRow = document.getElementById("sortFieldRow");
+  const sortTargetInfo = document.getElementById("sortTargetInfo");
+  const sortErr = document.getElementById("sortErr");
+  let sortOrderVal = 1;
+
+  function openSortModal() {
+    if (currentData === undefined) { doProcess(); return; }
+    sortPath.value = findFirstArrayOfObjects(currentData) || "";
+    sortOrderVal = 1;
+    document.querySelectorAll("#sortOrder .seg-btn").forEach(function (b) {
+      b.classList.toggle("active", Number(b.getAttribute("data-order")) === 1);
+    });
+    sortErr.textContent = "";
+    sortMask.classList.remove("hidden");
+    refreshSortModal();
+    sortPath.focus();
+  }
+  function refreshSortModal() {
+    const root = currentData;
+    let path = sortPath.value.trim();
+    let target = getByPath(root, path);
+    let autoField = "";
+    if (target === undefined && path) {
+      const arrPath = findArrayByField(root, path);   // 把路径框输入当作字段名容错定位
+      if (arrPath) { autoField = path; sortPath.value = arrPath; path = arrPath; target = getByPath(root, path); }
+    }
+    const kind = classify(target);
+    if (kind === "scalar") {
+      sortFieldRow.style.display = "none";
+      sortTargetInfo.className = "sort-target-info bad";
+      sortTargetInfo.textContent = path ? ("路径「" + path + "」不是可排序的数组/对象") : "根不是可排序的数组/对象";
+      sortErr.textContent = "请调整路径后再应用";
+      return;
+    }
+    sortErr.textContent = "";
+    sortTargetInfo.className = "sort-target-info";
+    if (kind === "obj") {
+      sortFieldRow.style.display = "none";
+      sortTargetInfo.textContent = "对象 · 将按 key " + (sortOrderVal === 1 ? "升序" : "降序") + " 排列";
+    } else if (kind === "arrObj") {
+      sortFieldRow.style.display = "";
+      if (autoField) sortField.value = autoField;
+      else if (!sortField.value.trim()) sortField.value = firstObjField(target);
+      const f = sortField.value.trim();
+      sortTargetInfo.textContent = "对象数组（" + target.length + " 项）· 将按字段「" + (f || "首字段") + "」的值" + (sortOrderVal === 1 ? "升序" : "降序") + "排列";
+    } else {
+      sortFieldRow.style.display = "none";
+      sortTargetInfo.textContent = "标量数组（" + target.length + " 项）· 将按值" + (sortOrderVal === 1 ? "升序" : "降序") + "排列";
+    }
+  }
+  function applySort() {
+    const root = currentData;
+    if (root === undefined) { closeSortModal(); return; }
+    let path = sortPath.value.trim();
+    let target = getByPath(root, path);
+    let autoField = "";
+    if (target === undefined && path) {
+      const arrPath = findArrayByField(root, path);
+      if (arrPath) { autoField = path; path = arrPath; target = getByPath(root, path); }
+    }
+    const kind = classify(target);
+    if (kind === "scalar") { sortErr.textContent = "路径无效，无法排序"; return; }
+    let field = sortField.value.trim();
+    if (kind === "arrObj" && !field) field = firstObjField(target);
+    const sorted = sortValue(target, kind, field, sortOrderVal);
+    const newRoot = setByPath(root, path, sorted);
+    editor.setValue(JSON.stringify(newRoot, null, 2));
+    closeSortModal();
+  }
+  function closeSortModal() { sortMask.classList.add("hidden"); }
+
+  sortPath.addEventListener("input", refreshSortModal);
+  document.querySelectorAll("#sortOrder .seg-btn").forEach(function (b) {
+    b.addEventListener("click", function () {
+      sortOrderVal = Number(b.getAttribute("data-order"));
+      document.querySelectorAll("#sortOrder .seg-btn").forEach(function (x) { x.classList.toggle("active", x === b); });
+      refreshSortModal();
+    });
+  });
+  document.getElementById("sortApply").addEventListener("click", applySort);
+  document.getElementById("sortCancel").addEventListener("click", closeSortModal);
+  // 仅当点击「直接发生在背景遮罩上」才关闭：避免从输入框拖选文字、在遮罩上松手时，
+  // click 的 target 变成输入框与遮罩的最近公共祖先（即遮罩本身）而误关闭弹窗
+  let sortMaskArmed = false;
+  sortMask.addEventListener("pointerdown", function (e) { sortMaskArmed = (e.target === sortMask); });
+  sortMask.addEventListener("click", function (e) {
+    if (sortMaskArmed && e.target === sortMask) closeSortModal();
+    sortMaskArmed = false;
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    if (!sortMask.classList.contains("hidden")) closeSortModal();
+    if (!historyMask.classList.contains("hidden")) closeHistoryModal();
+  });
+
+  /* ---------- SQL formatter helpers ---------- */
+  function stripQuotes(s) {
+    s = s.trim();
+    if (s.length >= 2 && s.charAt(0) === '"' && s.charAt(s.length - 1) === '"') return s.slice(1, -1);
+    return s;
+  }
+  function sqlUnescape(raw) {
+    let s = stripQuotes(raw);
+    s = s.replace(/\\"/g, "'");
+    s = s.replace(/\\t/g, "\t");
+    s = s.replace(/\\n/g, "\n");
+    s = s.replace(/\\r/g, "");
+    return s;
+  }
+  function formatSize(b) {
+    if (b < 1024) return b + " B";
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + " KB";
+    return (b / 1024 / 1024).toFixed(1) + " MB";
+  }
+  function computeStats(text) {
+    const lines = text === "" ? 0 : text.split("\n").length;
+    const bytes = new Blob([text]).size;
+    return lines + " 行 · " + formatSize(bytes);
+  }
+  /* ---- Hibernate 原生日志解析 ---- */
+  // 兼容两种常见形态：
+  //   1) show_sql=true              Hibernate: select ... where id=?
+  //   2) logger org.hibernate.SQL   2024-01-01 10:00:00.123 DEBUG ... org.hibernate.SQL : select ...
+  // 并把 TRACE 级 "binding parameter [1] as [BIGINT] - [5]" 的实参按顺序回填到 ? 占位符
+  const HB_BIND_RE = /binding parameter \[(\d+)\]\s*as\s*\[([^\]]*)\]\s*-\s*\[([\s\S]*)\]\s*$/i;
+  const LOG_LINE_RE = /^\s*(?:\d{4}-\d{2}-\d{2}[ T][\d:.,]+|\[?\d{2}:\d{2}:\d{2})/;
+  const LOG_LEVEL_RE = /^\s*(TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\b/;
+
+  function hibernateSqlHead(line) {
+    const hi = line.indexOf("Hibernate:");
+    if (hi !== -1) return line.slice(hi + "Hibernate:".length);
+    const m = line.match(/\borg\.hibernate[\w.]*SQL[\w.]*\s*:\s*(.*)$/i);
+    if (m) return m[1];
+    return null;
+  }
+  // 绑定参数按 Java 类型还原成 SQL 字面量
+  function hibernateLiteral(type, val) {
+    const t = String(type || "").trim().toUpperCase();
+    const v = (val === undefined || val === null) ? "null" : String(val);
+    if (v === "null" || t === "NULL" || t === "UNKNOWN") return "NULL";
+    if (/^(BIGINT|BIGINTEGER|BIGDECIMAL|INTEGER|INT|SMALLINT|TINYINT|LONG|NUMBER|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL)$/.test(t)) return v;
+    if (/^(BOOLEAN|BOOL|BIT)$/.test(t)) return v;
+    if (/^(BYTE\[\]|BINARY|VARBINARY|BLOB|SERIALIZABLE)$/.test(t)) return "0x" + v;
+    return "'" + v.replace(/'/g, "''") + "'";
+  }
+  // 返回语句数组；识别不到日志形态时返回 null（调用方回退为普通字符串处理）
+  function parseHibernateLog(raw) {
+    const lines = raw.split(/\r?\n/);
+    const parts = [], params = [];
+    let cur = null;
+    lines.forEach(function (line) {
+      const bind = line.match(HB_BIND_RE);
+      if (bind) {
+        if (cur !== null) { parts.push(cur); cur = null; }
+        params.push({ idx: parseInt(bind[1], 10), type: bind[2], val: bind[3] });
+        return;
+      }
+      const head = hibernateSqlHead(line);
+      if (head !== null) {
+        if (cur !== null) parts.push(cur);
+        cur = head;
+        return;
+      }
+      if (cur === null) return;
+      if (!line.trim() || LOG_LINE_RE.test(line) || LOG_LEVEL_RE.test(line)) {
+        parts.push(cur); cur = null; return;
+      }
+      cur += " " + line;
+    });
+    if (cur !== null) parts.push(cur);
+    if (!parts.length) return null;
+
+    let k = 0;
+    const out = [];
+    parts.forEach(function (p) {
+      const one = p.replace(/\s+/g, " ").trim();
+      if (!one) return;
+      out.push(one.replace(/\?/g, function () {
+        if (k >= params.length) return "?";
+        const pr = params[k++];
+        return hibernateLiteral(pr.type, pr.val);
+      }));
+    });
+    return out.length ? out : null;
+  }
+  // 按「来源」还原成语句数组（不排版）
+  function extractSQLStatements(raw, source) {
+    if (source === "hibernate") {
+      const stmts = parseHibernateLog(raw);
+      if (stmts) return stmts;
+    }
+    return [sqlUnescape(raw)];
+  }
+  function formatSQL(raw, source) {
+    return extractSQLStatements(raw, source).map(formatOne).join("\n;\n");
+  }
+  function formatOne(stmt) {
+    let s = stmt;
+    // 保护字符串/注释里的内容，避免关键字替换破坏它们
+    const protectedChunks = [];
+    function protect(re) {
+      s = s.replace(re, function (m) {
+        protectedChunks.push(m);
+        return "__P" + (protectedChunks.length - 1) + "__";
+      });
+    }
+    protect(/'([^'\\\\]*(?:\\\\.[^'\\\\]*)*)'/g);
+    protect(/"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)"/g);
+    protect(/--[^\n]*/g);
+    protect(/\/\*[\s\S]*?\*\//g);
+    protect(/`[^`]*`/g);
+
+    // 规范化空白
+    s = s.replace(/\s+/g, " ").trim();
+
+    // 在主要子句前换行（长的先匹配）
+    const breaks = [
+      "SELECT", "FROM", "WHERE", "ORDER BY", "GROUP BY", "HAVING",
+      "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "OUTER JOIN", "FULL JOIN", "JOIN",
+      "UNION ALL", "UNION", "INSERT INTO", "INSERT", "INTO", "VALUES",
+      "UPDATE", "SET", "DELETE FROM", "DELETE", "LIMIT", "OFFSET"
+    ];
+    breaks.sort(function (a, b) { return b.length - a.length; });
+    breaks.forEach(function (kw) {
+      const re = new RegExp("\\b" + kw.replace(/ /g, "\\s+") + "\\b", "gi");
+      s = s.replace(re, "\n" + kw.toUpperCase());
+    });
+
+    // SELECT / FROM 列表里的逗号后换行（简单启发式）
+    s = s.replace(/, ([a-zA-Z0-9_`\*]+)/g, ",\n__CONT__$1");
+
+    // 还原受保护内容
+    s = s.replace(/__P(\d+)__/g, function (_, i) { return protectedChunks[+i]; });
+
+    // 按括号深度缩进；逗号续行多缩进两级
+    const lines = s.split("\n");
+    const out = [];
+    let depth = 0;
+    lines.forEach(function (rawLine) {
+      let line = rawLine.trim();
+      if (!line) return;
+      let isCont = false;
+      if (line.indexOf("__CONT__") === 0) { isCont = true; line = line.slice(8); }
+      if (line.charAt(0) === ")") depth = Math.max(0, depth - 1);
+      out.push("  ".repeat(depth + (isCont ? 2 : 0)) + line);
+      const open = (line.match(/\(/g) || []).length;
+      const close = (line.match(/\)/g) || []).length;
+      depth += open - close;
+      if (depth < 0) depth = 0;
+    });
+    return out.join("\n");
+  }
+  function showSQLOutput(text) {
+    sqlOutput.classList.add("has-result");
+    sqlViewer.setValue(text);
+    sqlViewer.clearHistory();
+    sqlViewer.setCursor({ line: 0, ch: 0 });
+    sqlViewer.refresh();
+    sqlInputStats.textContent = computeStats(editor.getValue());
+    sqlOutputStats.textContent = computeStats(text);
+  }
+  function clearSQLOutput() {
+    sqlOutput.classList.remove("has-result");
+    sqlViewer.setValue("");
+    sqlViewer.clearHistory();
+    sqlInputStats.textContent = "";
+    sqlOutputStats.textContent = "";
+  }
+  function runSQLParse() {
+    showSQLOutput(extractSQLStatements(editor.getValue(), sqlSource.value).join("\n;\n"));
+  }
+  function runSQLFormat() {
+    showSQLOutput(formatSQL(editor.getValue(), sqlSource.value));
+  }
+
+  function setAppMode(mode) {
+    if (mode !== "json" && mode !== "sql") return;
+    appMode = mode;
+    document.body.classList.toggle("mode-sql", mode === "sql");
+    appModeTabs.querySelectorAll(".app-tab").forEach(function (b) {
+      b.classList.toggle("active", b.getAttribute("data-mode") === mode);
+    });
+    editor.setOption("mode", mode === "json" ? { name: "javascript", json: true } : "mysql");
+    if (mode === "json") {
+      doProcess();
+    } else {
+      clearErrorMarks();
+      errBox.classList.remove("show");
+      clearSQLOutput();
+      // 切到 SQL 模式后容器才可见，需重算只读视图尺寸
+      setTimeout(function () { sqlViewer.refresh(); }, 0);
+    }
+  }
+
+  function cmdUnescape() {
+    const text = editor.getValue().trim();
+    if (!text) return;
+    let first; try { first = JSON.parse(text); } catch (e) { doProcess(); return; }
+    if (typeof first === "string") {
+      // whole input was a JSON string (double-encoded) -> decode one layer
+      try {
+        const second = JSON.parse(first);
+        editor.setValue(JSON.stringify(second, null, 2));
+      } catch (e2) {
+        editor.setValue(first); // plain decoded string
+      }
+    } else {
+      leftBadge.textContent = "无需去转义";
+    }
+  }
+  cmdSelect.addEventListener("change", function () {
+    const v = cmdSelect.value;
+    cmdSelect.value = "";
+    if (!v) return;
+    if (v === "format") cmdFormat();
+    else if (v === "minify") cmdMinify();
+    else if (v === "compact") cmdCompact();
+    else if (v === "unescape") cmdUnescape();
+    else if (v === "sort") {
+      openSortModal();
+    }
+  });
+
+  if (btnNavBack) btnNavBack.addEventListener("click", function () { navGo(-1); });
+  if (btnNavFwd) btnNavFwd.addEventListener("click", function () { navGo(1); });
+
+  /* ---------- events ---------- */
+  editor.on("change", function () {
+    process();
+    scheduleHistorySnapshot();
+  });
+
+  btnEscape.addEventListener("click", function () {
+    showEscaped = !showEscaped;
+    btnEscape.textContent = "转义: " + (showEscaped ? "开" : "关");
+    btnEscape.classList.toggle("on", showEscaped);
+    if (currentData !== undefined) { renderTree(currentData); openInNavigator(navContext, navRootLabel); }
+  });
+
+  document.getElementById("btn-sample").addEventListener("click", function () {
+    editor.setValue(JSON.stringify(SAMPLE, null, 2));
+  });
+  document.getElementById("btn-format").addEventListener("click", function () {
+    const text = editor.getValue().trim();
+    if (!text) return;
+    try {
+      const d = JSON.parse(text);
+      editor.setValue(JSON.stringify(d, null, 2));
+    } catch (e) {
+      doProcess();
+    }
+  });
+  /* ---------- 粘贴后自动格式化（json 模式） ----------
+     粘贴落定后尝试解析，能解析且当前不是 2 空格缩进格式时才 setValue，
+     避免重复格式化造成光标跳动；解析失败（如片段拼接中）则走原有防抖解析 */
+  editor.getWrapperElement().addEventListener("paste", function () {
+    if (appMode !== "json") return;
+    setTimeout(function () {
+      const text = editor.getValue();
+      const t = text.trim();
+      if (!t) return;
+      let d; try { d = JSON.parse(t); } catch (e) { return; }
+      const pretty = JSON.stringify(d, null, 2);
+      if (t !== pretty) {
+        const cur = editor.getCursor();
+        editor.setValue(pretty);
+        editor.setCursor(cur);
+      }
+      doProcess();
+    }, 0);
+  });
+  document.getElementById("btn-clear").addEventListener("click", function () {
+    editor.setValue("");
+    editor.focus();
+    if (appMode === "sql") clearSQLOutput();
+  });
+
+  appModeTabs.querySelectorAll(".app-tab").forEach(function (b) {
+    b.addEventListener("click", function () { setAppMode(b.getAttribute("data-mode")); });
+  });
+  btnSqlParse.addEventListener("click", runSQLParse);
+  btnSqlFormat.addEventListener("click", runSQLFormat);
+  sqlSource.addEventListener("change", function () {
+    if (appMode !== "sql") return;
+    clearSQLOutput();
+    // 切换来源后自动重跑一次，避免用户再点一次按钮
+    runSQLFormat();
+  });
+
+  document.getElementById("btn-history").addEventListener("click", openHistoryModal);
+  document.getElementById("historyCancel").addEventListener("click", closeHistoryModal);
+  document.getElementById("historyClear").addEventListener("click", clearHistory);
+  let historyMaskArmed = false;
+  historyMask.addEventListener("pointerdown", function (e) { historyMaskArmed = (e.target === historyMask); });
+  historyMask.addEventListener("click", function (e) {
+    if (historyMaskArmed && e.target === historyMask) closeHistoryModal();
+    historyMaskArmed = false;
+  });
+
+  window.addEventListener("resize", function () {
+    if (graphMode && graphSvg) {
+      graphSvg.setAttribute("width", graphView.clientWidth);
+      graphSvg.setAttribute("height", graphView.clientHeight);
+    }
+    refreshMinimap();
+  });
+
+  // initial
+  setMode(true);
+  doProcess();
+})();
+</script>
+</body>
+</html>
