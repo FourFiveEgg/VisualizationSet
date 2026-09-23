@@ -2959,11 +2959,27 @@
   }
   function sqlUnescape(raw) {
     let s = stripQuotes(raw);
-    s = s.replace(/\\"/g, "'");
-    s = s.replace(/\\t/g, "\t");
-    s = s.replace(/\\n/g, "\n");
-    s = s.replace(/\\r/g, "");
-    return s;
+    // 1) 先解析 PHP 转义序列，得到「求值后」的 SQL 文本：
+    //    \\ -> \   \" -> "   \n -> 换行   \t -> 制表符   \r -> 丢弃
+    //    这样裸双引号 "x" 与转义双引号 \"x\" 在求值后都变成 "x"
+    let out = "";
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === "\\" && i + 1 < s.length) {
+        const n = s[i + 1];
+        if (n === '"') { out += '"'; i++; continue; }
+        if (n === "\\") { out += "\\"; i++; continue; }
+        if (n === "n") { out += "\n"; i++; continue; }
+        if (n === "t") { out += "\t"; i++; continue; }
+        if (n === "r") { i++; continue; }   // 丢弃 \r
+        out += c; i++; continue;            // 其它转义原样保留反斜杠
+      }
+      out += c;
+    }
+    // 2) PHP 字符串里的双引号都视为 SQL 字符串字面量，统一转成单引号
+    //    （同时覆盖裸 "x" 与转义求值得到的 "x"）
+    out = out.replace(/"/g, "'");
+    return out;
   }
   function formatSize(b) {
     if (b < 1024) return b + " B";
