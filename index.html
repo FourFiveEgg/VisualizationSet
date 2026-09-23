@@ -3154,7 +3154,8 @@
     appModeTabs.querySelectorAll(".app-tab").forEach(function (b) {
       b.classList.toggle("active", b.getAttribute("data-mode") === mode);
     });
-    editor.setOption("mode", mode === "json" ? { name: "javascript", json: true } : "mysql");
+    // SQL 模式下输入框取消语法高亮（纯文本），格式化结果仍由 sqlViewer 保留 mysql 高亮
+    editor.setOption("mode", mode === "json" ? { name: "javascript", json: true } : null);
     if (mode === "json") {
       doProcess();
     } else {
