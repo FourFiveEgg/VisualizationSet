@@ -3216,8 +3216,6 @@
   }
   cmdSelect.addEventListener("change", function () {
     const v = cmdSelect.value;
-    cmdSelect.value = "";
-    cmdSelect.blur();   // 执行后去掉聚焦高亮，让下拉框回到默认样式
     if (!v) return;
     if (v === "format") cmdFormat();
     else if (v === "minify") cmdMinify();
@@ -3226,6 +3224,8 @@
     else if (v === "sort") {
       openSortModal();
     }
+    // 保留当前选中的命令：下拉框与展开列表都显示/勾选该命令，点击别处也不会回退
+    cmdSelect.blur();   // 仅去掉聚焦高亮样式，不改变已选中的值
   });
 
   if (btnNavBack) btnNavBack.addEventListener("click", function () { navGo(-1); });
