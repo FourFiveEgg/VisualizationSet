@@ -575,6 +575,7 @@
         </button>
       </div>
       <span class="sql-only sql-stats" id="sqlOutputStats"></span>
+      <button class="btn tiny sql-only" id="btn-sql-wrap" title="SQL 结果按视图宽度自动换行（压缩单行时尤其有用）">自动换行</button>
       <span class="tool-spacer json-only"></span>
       <button class="btn tiny json-only" id="btn-escape" title="切换字符串转义显示" data-page-node-id="wnFHMtOfpqhAjjnXGXLOxB">转义: 关</button>
       <button class="btn tiny json-only" id="btn-style" title="缩略图导航" data-page-node-id="IdPHXLpnB3ssmMTFScVBjQ">导航</button>
@@ -738,6 +739,7 @@
   const btnSqlParse = document.getElementById("btn-sql-parse");
   const btnSqlFormat = document.getElementById("btn-sql-format");
   const btnSqlCompress = document.getElementById("btn-sql-compress");
+  const btnSqlWrap = document.getElementById("btn-sql-wrap");
   const historyMask = document.getElementById("historyMask");
 
   const SAMPLE = {
@@ -3285,6 +3287,12 @@
   btnSqlParse.addEventListener("click", runSQLParse);
   btnSqlFormat.addEventListener("click", runSQLFormat);
   btnSqlCompress.addEventListener("click", runSQLCompress);
+  btnSqlWrap.addEventListener("click", function () {
+    const on = !sqlViewer.getOption("lineWrapping");
+    sqlViewer.setOption("lineWrapping", on);
+    btnSqlWrap.classList.toggle("on", on);
+    sqlViewer.refresh();
+  });
   sqlSource.addEventListener("change", function () {
     if (appMode !== "sql") return;
     clearSQLOutput();
