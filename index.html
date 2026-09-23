@@ -544,6 +544,7 @@
         </select>
         <button class="btn tiny" id="btn-sql-parse" title="仅做转义还原 / 日志提取（不改排版）">解析</button>
         <button class="btn tiny on" id="btn-sql-format" title="还原并格式化 SQL">格式化</button>
+        <button class="btn tiny" id="btn-sql-compress" title="还原并压缩为单行 SQL">压缩</button>
         <span class="sql-stats" id="sqlInputStats"></span>
       </div>
       <span class="badge json-only" id="left-badge" data-page-node-id="rDydEp8ULjt8TLYgZoY5nE">等待输入</span>
@@ -736,6 +737,7 @@
   const sqlOutputStats = document.getElementById("sqlOutputStats");
   const btnSqlParse = document.getElementById("btn-sql-parse");
   const btnSqlFormat = document.getElementById("btn-sql-format");
+  const btnSqlCompress = document.getElementById("btn-sql-compress");
   const historyMask = document.getElementById("historyMask");
 
   const SAMPLE = {
@@ -3068,6 +3070,30 @@
   function formatSQL(raw, source) {
     return extractSQLStatements(raw, source).map(formatOne).join("\n;\n");
   }
+  // 压缩：把单条语句压成单行（空白折叠为单空格），字符串/注释受保护不被压缩
+  function compressOne(stmt) {
+    let s = stmt;
+    const protectedChunks = [];
+    function protect(re) {
+      s = s.replace(re, function (m) {
+        protectedChunks.push(m);
+        return "__P" + (protectedChunks.length - 1) + "__";
+      });
+    }
+    // 先保护字符串/反引号标识符/块注释，避免其中出现的 -- 被误当行注释
+    protect(/'([^'\\]*(?:\\.[^'\\]*)*)'/g);
+    protect(/"([^"\\]*(?:\\.[^"\\]*)*)"/g);
+    protect(/`[^`]*`/g);
+    protect(/\/\*[\s\S]*?\*\//g);
+    // 行注释 -- 在单行压缩里会变成「注释掉本行剩余内容」，转成块注释 /* */ 以便安全内联
+    s = s.replace(/--[^\n]*/g, function (m) { return "/*" + m.slice(2).trim() + "*/"; });
+    s = s.replace(/\s+/g, " ").trim();
+    s = s.replace(/__P(\d+)__/g, function (_, i) { return protectedChunks[+i]; });
+    return s;
+  }
+  function compressSQL(raw, source) {
+    return extractSQLStatements(raw, source).map(compressOne).join("; ");
+  }
   function formatOne(stmt) {
     let s = stmt;
     // 保护字符串/注释里的内容，避免关键字替换破坏它们
@@ -3145,6 +3171,9 @@
   }
   function runSQLFormat() {
     showSQLOutput(formatSQL(editor.getValue(), sqlSource.value));
+  }
+  function runSQLCompress() {
+    showSQLOutput(compressSQL(editor.getValue(), sqlSource.value));
   }
 
   function setAppMode(mode) {
@@ -3255,6 +3284,7 @@
   });
   btnSqlParse.addEventListener("click", runSQLParse);
   btnSqlFormat.addEventListener("click", runSQLFormat);
+  btnSqlCompress.addEventListener("click", runSQLCompress);
   sqlSource.addEventListener("change", function () {
     if (appMode !== "sql") return;
     clearSQLOutput();
