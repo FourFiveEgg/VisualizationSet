@@ -3217,6 +3217,7 @@
   cmdSelect.addEventListener("change", function () {
     const v = cmdSelect.value;
     cmdSelect.value = "";
+    cmdSelect.blur();   // 执行后去掉聚焦高亮，让下拉框回到默认样式
     if (!v) return;
     if (v === "format") cmdFormat();
     else if (v === "minify") cmdMinify();
