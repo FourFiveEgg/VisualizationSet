@@ -197,6 +197,14 @@
   .gcollapse.closed circle { fill: #fff3e8; stroke: #e8590c; }
   .gcollapse text { font: 700 11px var(--ui-font); fill: #0a6cce; user-select: none; }
   .gcollapse.closed text { fill: #e8590c; }
+  /* 选中节点的上下游连线高亮：父→当前(上游, 橙) / 当前→子(下游, 蓝)；其余连线淡化 */
+  #graphSvg.has-sel .gedge { opacity: .28; }
+  #graphSvg.has-sel .gedge.up,
+  #graphSvg.has-sel .gedge.down { opacity: 1; }
+  .gedge.up   { stroke: #e8590c; stroke-width: 2.6; }
+  .gedge.down { stroke: #2f6feb; stroke-width: 2.6; }
+  /* 缩略图中标记当前选中框的位置 */
+  .map-sel { position: absolute; border: 1.6px solid #2f6feb; background: rgba(47, 111, 235, .16); border-radius: 3px; pointer-events: none; display: none; box-sizing: border-box; z-index: 3; }
   /* 值高亮（markText，仅字段值、不含键名）：颜色对齐浏览器文本选中的高亮色 */
   .cm-graph-hl { background: #b3d4fc !important; border-radius: 2px; }
   /* 整行高亮（addLineClass 到 background）：覆盖行首缩进、行尾空白与整行行高，即「行的间距部分」 */
@@ -324,11 +332,17 @@
     border: 1px solid var(--border); border-radius: 6px; overflow: hidden; cursor: grab;
   }
   .map-thumb {
-    position: absolute; left: 4px; right: 4px; top: 0; height: 40px;
+    position: absolute; left: 4px; right: 4px; top: 0; height: 40px; z-index: 2;
     background: rgba(47,111,235,.16); border: 1.5px solid var(--accent); border-radius: 3px;
     cursor: grab;
   }
   .map-thumb:active { cursor: grabbing; background: rgba(47,111,235,.34); }
+  /* 缩略图总览层：始终显示所有外框线（节点框）与框之间的连线 */
+  #mapOv { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+  .map-ov-rect { fill: rgba(120,140,170,.12); stroke: var(--g-node-border); stroke-width: .6; }
+  .map-ov-rect.sel { fill: rgba(47,111,235,.22); stroke: var(--accent); stroke-width: 1; }
+  .map-ov-edge { fill: none; stroke: var(--g-edge); stroke-width: .6; }
+  .map-ov-edge.seq { stroke: #9aa6b6; stroke-width: .5; stroke-dasharray: 2 1.5; }
 
   /* ---------- bottom selection (drill-down) panel ---------- */
   .sel-panel {
@@ -618,7 +632,9 @@
     <div class="map-win" id="mapWin" style="display:none" title="缩略图导航：点击或拖动可定位视图">
       <div class="map-body">
         <div class="map-mini" id="mapMini">
+          <svg class="map-ov" id="mapOv" xmlns="http://www.w3.org/2000/svg"></svg>
           <div class="map-thumb" id="mapThumb"></div>
+          <div class="map-sel" id="mapSel"></div>
         </div>
       </div>
     </div>
@@ -1146,6 +1162,7 @@
   function truncate(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
 
   let graphNodes = [], graphEdges = [], graphRoot = null, graphSelectedId = null;
+  let graphLayoutVersion = 0;   // 关系图布局（节点位置/收起/拖拽）变更计数，驱动缩略图总览重建
   const collapsed = new Set();
   const GN_W = 200, V_GAP = 30, MARGIN = 48, LEVEL_GAP = 92;
   // 节点统一成「表格框」：不再有独立标题栏 / 元素名，表头方向按数据结构区分 ——
@@ -1158,6 +1175,9 @@
   const G_KEY_MIN = 52, G_KEY_MAX = 150, G_VAL_MIN = 108, G_VAL_MAX = 260;
   function isRootNode(n) { return n === graphRoot; }
   let panX = 0, panY = 0, worldW = 0, worldH = 0, graphRootG = null;
+  // 文档实际包围盒（含拖拽偏移、取可见节点 min/max）—— 缩略图范围与画布平移钳制都用它，
+  // 这样被拖到负坐标 / 原范围外的节点框也能完整显示在缩略图内，且平移范围与之严格一致。
+  let docMinX = 0, docMinY = 0, docW = 0, docH = 0;
 
   function buildGraph(data) {
     graphNodes = []; graphEdges = [];
@@ -1507,7 +1527,31 @@
       n.children.forEach(function (c) { collect(c, c.parentEdge && collapsed.has(c.parentEdge.key)); });
     })(graphRoot, false);
 
+    // 文档实际包围盒：取「可见节点」的真实位置（含拖拽偏移）的最小/最大，
+    // 作为缩略图范围与画布平移钳制的统一基准（节点可被拖到负坐标 / 原范围外，也必须纳入）。
+    docMinX = Infinity; docMinY = Infinity;
+    let dMaxX = -Infinity, dMaxY = -Infinity;
+    graphNodes.forEach(function (n) {
+      if (!visibleSet.has(n.id)) return;
+      const x = n.x + (n.userDX || 0), y = n.y + (n.userDY || 0);
+      if (x < docMinX) docMinX = x;
+      if (y < docMinY) docMinY = y;
+      if (x + n.w > dMaxX) dMaxX = x + n.w;
+      if (y + n.h > dMaxY) dMaxY = y + n.h;
+    });
+    if (docMinX === Infinity) { docMinX = 0; docMinY = 0; dMaxX = worldW || 1; dMaxY = worldH || 1; }
+    docW = Math.max(1, dMaxX - docMinX);
+    docH = Math.max(1, dMaxY - docMinY);
+
+
     let edges = "";
+    // 选中节点相关边高亮：e.to 为选中 → 上游(父→当前)；e.from 为选中 → 下游(当前→子)
+    function edgeHL(e) {
+      if (!graphSelectedId) return "";
+      if (e.to.id === graphSelectedId) return " up";
+      if (e.from.id === graphSelectedId) return " down";
+      return "";
+    }
     graphEdges.forEach(function (e) {
       if (!visibleSet.has(e.from.id) || !visibleSet.has(e.to.id)) return;
       const p = e.from, c = e.to;
@@ -1515,7 +1559,7 @@
         // 兄弟序列连线（垂直）：[i] 底部中点 → [i+1] 顶部中点
         const x1 = p.x + p.w / 2, y1 = p.y + p.h, x2 = c.x + c.w / 2, y2 = c.y;
         const my = (y1 + y2) / 2;
-        edges += '<path class="gedge seq" d="M' + x1 + ',' + y1 + ' C' + x1 + ',' + my + ' ' + x2 + ',' + my + ' ' + x2 + ',' + y2 + '"/>';
+        edges += '<path class="gedge seq' + edgeHL(e) + '" data-from="' + p.id + '" data-to="' + c.id + '" d="M' + x1 + ',' + y1 + ' C' + x1 + ',' + my + ' ' + x2 + ',' + my + ' ' + x2 + ',' + y2 + '"/>';
       } else {
         // 父子连线（水平）：从父框内「对应字段行」的右缘中点连出 → 子左侧中点
         // （对象字段行 / 数组元素行都是「行」，只是行高与数据区起点不同）
@@ -1525,7 +1569,7 @@
         const y1 = rowTopOf(p) + fr * rh + rh / 2;
         const x2 = c.x, y2 = c.y + c.h / 2;
         const mx = (x1 + x2) / 2, mid = (y1 + y2) / 2;
-        edges += '<path class="gedge" d="M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2 + '"/>';
+        edges += '<path class="gedge' + edgeHL(e) + '" data-from="' + p.id + '" data-to="' + c.id + '" d="M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2 + '"/>';
         if (e.label) {
           const tw = esc(e.label).length * 6 + 10;
           edges += '<rect class="gedge-label-bg" x="' + ((x1 + x2) / 2 - tw / 2) + '" y="' + (mid - 12) + '" width="' + tw + '" height="14" rx="3"/>';
@@ -1571,14 +1615,22 @@
       nodes += '<text x="' + cx + '" y="' + (cy + 3.6) + '" text-anchor="middle">' + (open ? "–" : "+") + '</text>';
       nodes += '</g>';
     });
-    graphView.innerHTML = '<svg id="graphSvg" width="' + graphView.clientWidth + '" height="' + graphView.clientHeight + '"><g id="graphRootG" transform="translate(' + panX + ',' + panY + ') scale(' + graphScale + ')">' + edges + nodes + '</g></svg>';
+    graphView.innerHTML = '<svg id="graphSvg" class="' + (graphSelectedId ? "has-sel" : "") + '" width="' + graphView.clientWidth + '" height="' + graphView.clientHeight + '"><g id="graphRootG" transform="translate(' + panX + ',' + panY + ') scale(' + graphScale + ')">' + edges + nodes + '</g></svg>';
+    applyGraphSelHighlight();
+    if (mapUserOpen) refreshMinimap();
     graphSvg = document.getElementById("graphSvg");
     graphRootG = document.getElementById("graphRootG");
     bindGraphNodeEvents();
     applyGraphRowHighlight();        // 重绘（拖拽等）后恢复行级高亮
+    graphLayoutVersion++;
     refreshMinimap();
   }
 
+  // 画布平移不做范围限制（节点框与画布都可自由拖动 / 平移，便于把某个框拖到视口中央单独查看），
+  // 缩略图导航始终以「文档实际包围盒 + MARGIN 留白」为范围绘制，因此：
+  //   - 被拖到负坐标 / 原范围外的框线仍完整可见；
+  //   - 框线到缩略图背景留有与实际画布一致的留白，比例不失真；
+  //   - 视口高亮框在可滚动方向上随平移移动，内容铺满视口时则填满（表示整页可见）。
   function applyGraphTransform() {
     if (graphRootG) graphRootG.setAttribute("transform", "translate(" + panX + "," + panY + ") scale(" + graphScale + ")");
     refreshMinimap();
@@ -1666,6 +1718,22 @@
       row.classList.add("hl-row");
     }
   }
+  /* 选中节点的上下游连线高亮（仅切换 class，不重排画布）：
+     给 svg 挂 has-sel，并将 e.to === 选中 的边标 .up（上游）、e.from === 选中 的边标 .down（下游）。
+     供 drawGraph 重建后、以及「导航/编辑器联动选中」这类不重绘画布的场景复用。 */
+  function applyGraphSelHighlight() {
+    if (!graphSvg) return;
+    graphSvg.classList.toggle("has-sel", !!graphSelectedId);
+    if (!graphSelectedId) {
+      graphSvg.querySelectorAll(".gedge.up, .gedge.down").forEach(function (p) { p.classList.remove("up", "down"); });
+      return;
+    }
+    graphSvg.querySelectorAll(".gedge").forEach(function (p) {
+      const f = p.getAttribute("data-from"), t = p.getAttribute("data-to");
+      p.classList.toggle("up", t === graphSelectedId);
+      p.classList.toggle("down", f === graphSelectedId);
+    });
+  }
   function findGraphNodeByPath(segs) {
     if (!segs) return null;
     for (let i = 0; i < graphNodes.length; i++) {
@@ -1716,6 +1784,8 @@
     } else graphRowSel = null;
     applyGraphRowHighlight();
     if (center) centerOnNode(target);
+    applyGraphSelHighlight();
+    refreshMinimap();
     return true;
   }
   // 关掉「–」收起态，让「当前元素」面板真正显示出来
@@ -1729,7 +1799,9 @@
     selectGNode(gNode);
     graphRowSel = null;              // 整框选中：清除行级高亮
     applyGraphRowHighlight();
+    applyGraphSelHighlight();
     updatePanels();
+    refreshMinimap();
   }
   // 画布平移：左键拖「空白画布」= 平移画布；左键拖「节点」= 移动该节点（节点 handler 已 stopPropagation，二者互斥）
   let panState = null;
@@ -1811,7 +1883,9 @@
       navigateToRootPath(fpath);
       selectGNode(d.gNode);
       applyGraphRowHighlight();
+      applyGraphSelHighlight();
       updatePanels();
+      refreshMinimap();
     } else {
       selectBox(node, d.gNode);
     }
@@ -2421,42 +2495,94 @@
   const mapWin = document.getElementById("mapWin");
   const mapMini = document.getElementById("mapMini");
   const mapThumb = document.getElementById("mapThumb");
+  const mapSel = document.getElementById("mapSel");
+  const mapOv = document.getElementById("mapOv");
+  let miniOvKey = "";   // 最近一次重建缩略图总览所用的「布局版本 + 缩略图尺寸」签名
 
   function getMainView() { return graphMode ? graphView : output; }
 
-  // 当前可见节点的「实际内容边界」（含拖拽偏移），用于让缩略图高亮框与 JSON 真实大小一致
-  function getGraphContentBounds() {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    if (graphRoot) {
-      (function collect(n, hidden) {
-        if (hidden) return;
-        const x = n.x + (n.userDX || 0), y = n.y + (n.userDY || 0);
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x + n.w > maxX) maxX = x + n.w;
-        if (y + n.h > maxY) maxY = y + n.h;
-        n.children.forEach(function (c) { collect(c, c.parentEdge && collapsed.has(c.parentEdge.key)); });
-      })(graphRoot, false);
-    }
-    if (minX === Infinity) { minX = 0; minY = 0; maxX = worldW || 1; maxY = worldH || 1; }
-    return { minX: minX, minY: minY, maxX: maxX, maxY: maxY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
-  }
-
-  /* 缩略图坐标系：把「画布世界坐标」线性映射到缩略图整块区域内（铺满），
-     —— 高亮框的定位与点击跳转共用同一套映射，保证两者始终一致 */
+  // 缩略图世界范围 = 关系图「文档实际包围盒 + MARGIN 留白」(docMinX/docMinY + docW/docH 再外扩 MARGIN)，
+  // 与画布平移(panX/panY)、节点世界坐标共用同一坐标系 —— 外框线、视口高亮框、鼠标拖拽三者比例一致；
+  // 且节点被拖到负坐标 / 原范围外时，包围盒会随之扩展，框线始终完整可见、不再贴边。
+  //
+  // 采用「单一统一缩放」+ 居中偏移：取两轴中较紧的一侧作为缩放比 s，另一侧会留下 letterbox 空白带；
+  // 这样高亮框（视口 = vw×vh 缩放后）严格保持宽高比 = 浏览器视口 (cw:ch)，与真实画布形状完全一致。
   function miniWorldParams() {
     const miniW = mapMini.clientWidth, miniH = mapMini.clientHeight;
-    const cb = getGraphContentBounds();
-    if (cb.w <= 0 || cb.h <= 0 || miniW <= 0 || miniH <= 0) return null;
-    return { miniW: miniW, miniH: miniH, cb: cb, sx: miniW / cb.w, sy: miniH / cb.h };
+    if (miniW <= 0 || miniH <= 0 || !docW || !docH) return null;
+    const padX = MARGIN, padY = MARGIN;
+    const minX = docMinX - padX, minY = docMinY - padY;
+    const wW = docW + padX * 2, hH = docH + padY * 2;
+    const cb = { minX: minX, minY: minY, maxX: minX + wW, maxY: minY + hH, w: wW, h: hH };
+    const s = Math.min(miniW / wW, miniH / hH);
+    const renderedW = wW * s, renderedH = hH * s;
+    const ox = (miniW - renderedW) / 2;
+    const oy = (miniH - renderedH) / 2;
+    return { miniW: miniW, miniH: miniH, cb: cb, s: s, ox: ox, oy: oy, renderedW: renderedW, renderedH: renderedH };
   }
-  function worldToMiniX(wx, p) { return (wx - p.cb.minX) * p.sx; }
-  function worldToMiniY(wy, p) { return (wy - p.cb.minY) * p.sy; }
-  function miniToWorldX(mx, p) { return p.cb.minX + mx / p.sx; }
-  function miniToWorldY(my, p) { return p.cb.minY + my / p.sy; }
+  function worldToMiniX(wx, p) { return (wx - p.cb.minX) * p.s + p.ox; }
+  function worldToMiniY(wy, p) { return (wy - p.cb.minY) * p.s + p.oy; }
+  function miniToWorldX(mx, p) { return p.cb.minX + (mx - p.ox) / p.s; }
+  function miniToWorldY(my, p) { return p.cb.minY + (my - p.oy) / p.s; }
+
+  // 缩略图总览层：始终把「所有可见节点外框线」与「框之间的连线」按同一世界→缩略图映射
+  // 缩放绘制到 #mapOv，使缩略图能看到整张关系图的结构，而不仅是当前视口框。
+  function updateMinimapContent() {
+    if (!mapOv) return;
+    if (!graphMode || !graphRoot) { mapOv.innerHTML = ""; miniOvKey = ""; return; }
+    const p = miniWorldParams();
+    if (!p) { mapOv.innerHTML = ""; miniOvKey = ""; return; }
+    // 仅在「布局版本 / 缩略图尺寸 / 当前选中」变化时才重建（平移/缩放不触发）
+    const key = graphLayoutVersion + "@" + p.miniW + "x" + p.miniH + "@" + (graphSelectedId || "");
+    if (key === miniOvKey) return;
+    miniOvKey = key;
+
+    // 可见集合：与关系图主体一致（收起的字段行会带其整棵子树一起隐藏）
+    const visibleSet = new Set();
+    (function collect(n, hidden) {
+      if (hidden) return;
+      visibleSet.add(n.id);
+      n.children.forEach(function (c) { collect(c, c.parentEdge && collapsed.has(c.parentEdge.key)); });
+    })(graphRoot, false);
+
+    let s = "";
+    // 先画连线（位于外框线之下）；坐标沿用与 mapSel / 内容边界一致的「n.x + userDX」约定
+    graphEdges.forEach(function (e) {
+      if (!visibleSet.has(e.from.id) || !visibleSet.has(e.to.id)) return;
+      const ep = e.from, ec = e.to;
+      if (e.seq) {
+        // 兄弟序列连线（垂直）：[i] 底部中点 → [i+1] 顶部中点
+        const x1 = worldToMiniX(ep.x + (ep.userDX || 0) + ep.w / 2, p), y1 = worldToMiniY(ep.y + (ep.userDY || 0) + ep.h, p);
+        const x2 = worldToMiniX(ec.x + (ec.userDX || 0) + ec.w / 2, p), y2 = worldToMiniY(ec.y + (ec.userDY || 0), p);
+        const my = (y1 + y2) / 2;
+        s += '<path class="map-ov-edge seq" d="M' + x1 + ',' + y1 + ' C' + x1 + ',' + my + ' ' + x2 + ',' + my + ' ' + x2 + ',' + y2 + '"/>';
+      } else {
+        // 父子连线（水平）：父框对应字段行右缘中点 → 子框左侧中点
+        const fr = (typeof e.fromRow === "number") ? e.fromRow : 0;
+        const rh = rowHOf(ep);
+        const x1 = worldToMiniX(ep.x + (ep.userDX || 0) + ep.w, p), y1 = worldToMiniY(rowTopOf(ep) + (ep.userDY || 0) + fr * rh + rh / 2, p);
+        const x2 = worldToMiniX(ec.x + (ec.userDX || 0), p), y2 = worldToMiniY(ec.y + (ec.userDY || 0) + ec.h / 2, p);
+        const mx = (x1 + x2) / 2;
+        s += '<path class="map-ov-edge" d="M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2 + '"/>';
+      }
+    });
+    // 再画外框线（节点框）
+    graphNodes.forEach(function (n) {
+      if (!visibleSet.has(n.id)) return;
+      const x = worldToMiniX(n.x + (n.userDX || 0), p), y = worldToMiniY(n.y + (n.userDY || 0), p);
+      const w = n.w * p.s, h = n.h * p.s;
+      const sel = (n.id === graphSelectedId) ? " sel" : "";
+      s += '<rect class="map-ov-rect' + sel + '" x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="1"/>';
+    });
+    mapOv.innerHTML = s;
+    // 总览层尺寸跟随缩略图，确保坐标映射正确
+    mapOv.setAttribute("viewBox", "0 0 " + p.miniW + " " + p.miniH);
+    mapOv.setAttribute("preserveAspectRatio", "none");
+  }
 
   function updateMinimapThumb() {
     const miniH = mapMini.clientHeight, miniW = mapMini.clientWidth;
+    if (mapSel) mapSel.style.display = "none";
     if (currentData === undefined || miniH <= 0) {
       mapThumb.style.left = "4px"; mapThumb.style.right = "4px"; mapThumb.style.width = "auto";
       mapThumb.style.top = "0px"; mapThumb.style.height = miniH + "px";
@@ -2470,20 +2596,35 @@
         mapThumb.style.top = "0px"; mapThumb.style.height = miniH + "px";
         mapWin.title = "缩略图导航：完整显示"; return;
       }
+      updateMinimapContent();   // 总览层：始终显示所有外框线与框间连线
       const vw = cw / graphScale, vh = ch / graphScale;
       const vLeft = -panX / graphScale, vTop = -panY / graphScale;
-      // 以「当前 JSON 实际内容边界」为缩略图世界范围，使高亮框大小与数据一致
-      let tw = vw * p.sx, th = vh * p.sy;
+      // 单一统一缩放：高亮框 (tw×th) 的宽高比严格等于浏览器视口 (cw:ch)，
+      // 再加 ox/oy 居中偏移，使其与缩略图总览层共用同一世界坐标，与真实画布形状一一对应。
+      let tw = vw * p.s, th = vh * p.s;
       let tx = worldToMiniX(vLeft, p), ty = worldToMiniY(vTop, p);
-      tw = Math.max(6, Math.min(tw, miniW));
-      th = Math.max(6, Math.min(th, miniH));
-      tx = Math.max(0, Math.min(tx, miniW - tw));
-      ty = Math.max(0, Math.min(ty, miniH - th));
+      // 钳制到「世界范围带」内（letterbox 空白带为多出来的一轴，是真实无内容；高亮框不应进入该带）
+      tw = Math.max(6, Math.min(tw, p.renderedW));
+      th = Math.max(6, Math.min(th, p.renderedH));
+      tx = Math.max(p.ox, Math.min(tx, p.ox + p.renderedW - tw));
+      ty = Math.max(p.oy, Math.min(ty, p.oy + p.renderedH - th));
       mapThumb.style.right = "auto"; mapThumb.style.left = tx + "px"; mapThumb.style.width = tw + "px";
       mapThumb.style.top = ty + "px"; mapThumb.style.height = th + "px";
       const pctX = Math.round((vLeft / p.cb.w) * 100), pctY = Math.round((vTop / p.cb.h) * 100);
       mapWin.title = "缩略图导航：视图 X " + pctX + "% · Y " + pctY + "% · 缩放 " + Math.round(graphScale * 100) + "%";
+      // 标记当前选中节点框在缩略图中的位置（与 mapThumb 共用 world→mini 映射）
+      if (graphSelectedId && mapSel) {
+        const sn = graphNodes.find(function (n) { return n.id === graphSelectedId; });
+        if (sn) {
+          const sx = worldToMiniX(sn.x + (sn.userDX || 0), p);
+          const sy = worldToMiniY(sn.y + (sn.userDY || 0), p);
+          mapSel.style.left = sx + "px"; mapSel.style.top = sy + "px";
+          mapSel.style.width = (sn.w * p.s) + "px"; mapSel.style.height = (sn.h * p.s) + "px";
+          mapSel.style.display = "block";
+        }
+      }
     } else {
+      updateMinimapContent();   // 列表模式无关系图，清空总览层
       const mv = output, sh = mv.scrollHeight, ch = mv.clientHeight;
       if (sh <= ch || sh <= 0) {
         mapThumb.style.left = "4px"; mapThumb.style.right = "4px"; mapThumb.style.width = "auto";
