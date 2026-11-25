@@ -83,7 +83,7 @@
   main { flex: 1 1 auto; display: flex; min-height: 0; }
   .pane { min-width: 0; display: flex; flex-direction: column; background: var(--panel); }
   .pane.left { border-right: 1px solid var(--border); flex: 0 0 28.57%; }
-  .pane.right { position: relative; flex: 1 1 auto; --tree-font: 13px; }
+  .pane.right { position: relative; flex: 1 1 auto; --tree-font: 13px; overflow: hidden; }   /* overflow:hidden 横向裁掉 SVG 越界元素，避免溢出到左面板 */
 
   /* vertical splitter (left / right) */
   .splitter {
@@ -100,6 +100,7 @@
     display: flex; align-items: center; gap: 8px; padding: 9px 14px;
     font-size: 12.5px; font-weight: 600; color: var(--muted);
     border-bottom: 1px solid var(--border); background: #fafbfc; flex-wrap: nowrap;
+    position: relative; z-index: 1;   /* 遮住 SVG 节点框向上越界到本工具栏区域的内容（与 .sel-panel 同理） */
   }
   .pane-head .ph-label { white-space: nowrap; }
   .pane-head .badge {
@@ -119,8 +120,9 @@
 
   /* merged toolbar: 结构视图 + 模式 + 转义/导航 + 缩放 + 搜索 全部在一行 */
   .tool-spacer { margin-left: auto; }
-  .search-box { display: flex; align-items: center; gap: 6px; }
+  .search-box { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .search-box.hidden { display: none; }
+  .search-box input { min-width: 0; }
   .icon-btn {
     display: inline-flex; align-items: center; justify-content: center;
     width: 30px; height: 30px; padding: 0; border: 1px solid var(--border);
@@ -133,16 +135,19 @@
   .mode-toggle { display: inline-flex; gap: 4px; margin-left: 8px; }
   .icon-btn.active { border-color: var(--accent); color: var(--accent); background: #eef4ff; }
 
-  /* relationship graph view */
+  /* relationship graph view
+     overflow: visible 让 SVG 内节点框可越过画布底边绘到下钻面板区域，
+     由下方 .sel-panel { position: relative; z-index: 1 } 干净地遮住，
+     避免 SVG viewport 在 y=480 处硬截节点框导致「画布背景穿透」 */
   .graph-view {
-    flex: 1 1 auto; min-height: 0; display: none; overflow: hidden; position: relative; cursor: grab; touch-action: none;
+    flex: 1 1 auto; min-height: 0; display: none; overflow: visible; position: relative; cursor: grab; touch-action: none;
     background: var(--g-canvas); background-image:
       linear-gradient(var(--g-canvas-line) 1px, transparent 1px), linear-gradient(90deg, var(--g-canvas-line) 1px, transparent 1px);
     background-size: 22px 22px;
   }
   .pane.right.mode-graph .output { display: none; }
   .pane.right.mode-graph .graph-view { display: block; }
-  .graph-view svg { display: block; }
+  .graph-view svg { display: block; overflow: visible; }   /* 关闭 SVG 默认 viewport clip，让节点 rect 可越界到下钻面板区域 */
 
   /* 节点框：对齐「列表模式」的表格样式（中性灰白配色，去掉类型彩色）
      外框 / 表头 / 内部网格线用三档深浅拉开层次，保证在浅色画布上分得清 */
@@ -159,7 +164,9 @@
   /* 数组合并框的竖表头（元素下标 [i]）与「另 N 项」溢出行 */
   .gnode-idx { font: 600 10.5px var(--ui-font); fill: var(--g-idx); user-select: none; pointer-events: none; }
   .gnode-val.more { fill: var(--g-idx); font-style: italic; }
+  .gnode-val.more-click { cursor: pointer; }
   .gnode-key.more { fill: var(--g-idx); font-style: italic; font-weight: 400; }
+  .gmore-hit { fill: transparent; cursor: pointer; }
   .grow-div { stroke: var(--g-line); stroke-width: 1; }
   .grow-div.col { stroke: var(--g-line); }
   /* 竖表头列 / 根节点键列的浅底：强调「横表头 + 竖表头」的表格结构 */
@@ -210,12 +217,27 @@
   /* 整行高亮（addLineClass 到 background）：覆盖行首缩进、行尾空白与整行行高，即「行的间距部分」 */
   .cm-graph-hl-line { background: #b3d4fc !important; }
   .search-box input {
-    font: inherit; font-size: 12.5px; padding: 5px 10px; width: 184px;
+    font: inherit; font-size: 12.5px; padding: 5px 10px; width: 150px; min-width: 0; flex: 0 1 150px;
     border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--text);
   }
   .search-box input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(47,111,235,.12); }
-  .search-count { font-size: 11px; color: var(--muted); min-width: 36px; text-align: right; }
+  .search-count { font-size: 11px; color: var(--muted); min-width: 46px; text-align: right; }
   .search-hit { background: #fff2a8 !important; border-radius: 3px; box-shadow: 0 0 0 1px #f0d35a; }
+  /* 全文搜索：左侧编辑器里所有命中（黄）/ 当前命中（橙），与浏览器 Ctrl+F 观感一致 */
+  .cm-search-hit { background: #fff2a8 !important; border-radius: 2px; box-shadow: 0 0 0 1px #f0d35a; }
+  .cm-search-cur { background: #ffb84d !important; border-radius: 2px; box-shadow: 0 0 0 1px #e8890c; }
+  /* graph 视图里 SVG <text> 没有 background，用描边做荧光笔效果 */
+  .search-hit-svg {
+    fill: #8a4b00 !important; font-weight: 700 !important;
+    paint-order: stroke fill; stroke: #ffe27a; stroke-width: 3px; stroke-linejoin: round;
+  }
+  .search-nav {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 26px; padding: 0; border: 1px solid var(--border);
+    background: #fff; color: var(--muted); border-radius: 6px; cursor: pointer;
+    font-size: 16px; line-height: 1; flex: 0 0 auto;
+  }
+  .search-nav:hover { border-color: var(--accent); color: var(--accent); }
 
   /* editor (CodeMirror) */
   .editor-host { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
@@ -337,10 +359,10 @@
     cursor: grab;
   }
   .map-thumb:active { cursor: grabbing; background: rgba(47,111,235,.34); }
-  /* 缩略图总览层：始终显示所有外框线（节点框）与框之间的连线 */
+  /* 缩略图总览层：始终显示所有外框线（节点框）与框之间的连线；节点框为淡粉色 */
   #mapOv { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
-  .map-ov-rect { fill: rgba(120,140,170,.12); stroke: var(--g-node-border); stroke-width: .6; }
-  .map-ov-rect.sel { fill: rgba(47,111,235,.22); stroke: var(--accent); stroke-width: 1; }
+  .map-ov-rect { fill: rgba(247, 190, 206, .55); stroke: #e8a0b8; stroke-width: .6; }
+  .map-ov-rect.sel { fill: rgba(233, 122, 158, .7); stroke: #cf5f8a; stroke-width: 1; }
   .map-ov-edge { fill: none; stroke: var(--g-edge); stroke-width: .6; }
   .map-ov-edge.seq { stroke: #9aa6b6; stroke-width: .5; stroke-dasharray: 2 1.5; }
 
@@ -348,6 +370,7 @@
   .sel-panel {
     flex: 0 0 auto; height: 320px; display: flex; flex-direction: column; min-height: 0;
     border-top: 1px solid var(--border); background: #fff;
+    position: relative; z-index: 1;   /* 显式堆叠层级，确保遮住下方 .graph-view SVG 越界到本区域的内容 */
   }
   .sel-panel.hidden { display: none; }
   .hidden { display: none !important; }
@@ -375,9 +398,10 @@
   .sel-body { flex: 1 1 auto; display: flex; min-height: 0; }
   /* 多级下钻列容器：列数不限，超出宽度时横向滚动 */
   .sel-cols { flex: 1 1 auto; min-width: 0; display: flex; overflow-x: auto; }
-  /* 正常列宽 = 除「最终值」外宽度的 1/3；数组元素列（[0] [1]…）= 1/2，即整体的 1/6 */
-  .sel-col { display: flex; flex-direction: column; min-height: 0; flex: 0 0 auto; width: calc(100% / 3); min-width: 96px; border-right: 1px solid var(--border); background: #fff; }
-  .sel-col.arr-col { width: calc(100% / 6); min-width: 60px; }
+  /* 列宽自适应：少数列时各列自动占满可用宽度（保证标题与内容不被截断），
+     列数过多时让 sel-cols 横向滚动。正常列最小 96px，数组列（[0] [1]…）最小 64px。 */
+  .sel-col { display: flex; flex-direction: column; min-height: 0; flex: 1 1 0; min-width: 96px; border-right: 1px solid var(--border); background: #fff; }
+  .sel-col.arr-col { flex: 1 1 0; min-width: 64px; }
   .sel-col-title { flex: 0 0 auto; font-size: 11px; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--border); background: #fafbfc; display: flex; align-items: center; gap: 4px; white-space: nowrap; overflow: hidden; }
   .sel-col-scroll { flex: 1 1 auto; overflow: auto; padding: 7px; }
   .sel-splitter { flex: 0 0 7px; cursor: col-resize; background: #eef1f5; position: relative; }
@@ -612,7 +636,9 @@
         </svg>
       </button>
       <div class="search-box hidden json-only" id="searchWrap" data-page-node-id="sb">
-        <input type="search" id="searchBox" placeholder="搜索…" data-page-node-id="sbIn">
+        <input type="search" id="searchBox" placeholder="搜索键名或值…" title="Enter 下一个 · Shift+Enter 上一个 · Esc 关闭" data-page-node-id="sbIn">
+        <button class="search-nav" id="btn-search-prev" type="button" title="上一个（Shift+Enter）">‹</button>
+        <button class="search-nav" id="btn-search-next" type="button" title="下一个（Enter）">›</button>
         <span class="search-count" id="searchCount" data-page-node-id="sbC"></span>
       </div>
       <span class="badge json-only" id="right-badge" data-page-node-id="QzWMPaGVoTBhatqSe9tCP7">—</span>
@@ -1164,6 +1190,9 @@
   let graphNodes = [], graphEdges = [], graphRoot = null, graphSelectedId = null;
   let graphLayoutVersion = 0;   // 关系图布局（节点位置/收起/拖拽）变更计数，驱动缩略图总览重建
   const collapsed = new Set();
+  // 数组节点「字段列全部展开」状态：key = JSON path 字符串（"channels"、"a.items"、"0" 之类），
+  // 节点重建（drawGraph）后 buildArray 用它判断是否绕过 T_COL_CAP 截断。
+  const expandedArrCols = new Set();
   const GN_W = 200, V_GAP = 30, MARGIN = 48, LEVEL_GAP = 92;
   // 节点统一成「表格框」：不再有独立标题栏 / 元素名，表头方向按数据结构区分 ——
   //   对象（含根节点）：表头「竖向」（左列 = 字段名，右列 = 值，每字段一行）
@@ -1209,11 +1238,20 @@
     function buildArray(arr, label, path) {
       const node = makeNode(label, "array");
       node.path = path;
+      node._arr = arr;        // 缓存原始数组引用，用于展开/折叠后重算 cols/rows（drawGraph 不重建 node）
       node.childCount = arr.length;
+      node._pathKey = path.join(".");    // 用于 expandedArrCols / 选中恢复等状态 key
+      applyArrayCols(node);
+      return node;
+    }
+    // 根据 node._arr + expandedArrCols 重算数组节点的 cols / rows / hiddenCols（节点体积变化 → 重排）
+    function applyArrayCols(node) {
+      const arr = node._arr;
+      const path = node.path;
       const total = arr.length, shown = Math.min(total, T_ROW_CAP);
       let objCnt = 0;
       for (let i = 0; i < shown; i++) if (typeOf(arr[i]) === "object") objCnt++;
-      const asTable = shown > 0 && objCnt === shown;   // 元素全是对象 → 二维表（有横表头）
+      const asTable = shown > 0 && objCnt === shown;
       let cols = [], hiddenCols = 0;
       if (asTable) {
         const allKeys = [], seen = {};
@@ -1222,7 +1260,7 @@
             if (!seen[k]) { seen[k] = 1; allKeys.push(k); }
           });
         }
-        if (allKeys.length > T_COL_CAP) {                // 字段过多：末列折成「…」并标出被折叠的字段数
+        if (allKeys.length > T_COL_CAP && !expandedArrCols.has(node._pathKey)) {
           hiddenCols = allKeys.length - (T_COL_CAP - 1);
           cols = allKeys.slice(0, T_COL_CAP - 1).concat(["…"]);
         } else {
@@ -1235,7 +1273,8 @@
       for (let i = 0; i < shown; i++) {
         const row = { label: "[" + i + "]", path: path.concat(i), cells: [] };
         if (asTable) cols.forEach(function (k) {
-          row.cells.push(k === "…" ? { text: "+" + hiddenCols, cls: "more" } : cellOf(arr[i][k]));
+          if (k === "…") row.cells.push({ text: "+" + hiddenCols, cls: "more more-click", id: node.id });
+          else row.cells.push(cellOf(arr[i][k]));
         });
         else row.cells.push(cellOf(arr[i]));
         node.rows.push(row);
@@ -1263,7 +1302,6 @@
           });
         }
       }
-      return node;
     }
     // 对象：字段写进 attrs（横表头 + 值行），嵌套的数组 / 对象各自建子框
     function fillObject(node, obj, path) {
@@ -1473,6 +1511,10 @@
         const end = n.colAlignEnd[ci];
         const tx = end ? (cxp + cwid - T_PAD_X) : (cxp + T_PAD_X);
         s += '<text class="gnode-val' + (cell.cls ? " " + cell.cls : "") + tcls(cell.t) + '" x="' + tx + '" y="' + ty + '"' + (end ? ' text-anchor="end"' : '') + '>' + esc(truncate(cell.text, 14)) + '</text>';
+        // 「+N」可点击单元格：加命中层（cursor:pointer + data-id），点击切换该节点字段的展开/折叠
+        if (cell.id && cell.cls && cell.cls.indexOf("more-click") !== -1) {
+          s += '<rect class="gmore-hit" data-id="' + esc(cell.id) + '" x="' + cxp + '" y="' + ry + '" width="' + cwid + '" height="' + T_ROW_H + '"/>';
+        }
         cxp += cwid;
       });
     });
@@ -1622,6 +1664,7 @@
     graphRootG = document.getElementById("graphRootG");
     bindGraphNodeEvents();
     applyGraphRowHighlight();        // 重绘（拖拽等）后恢复行级高亮
+    applySearchViewHighlights();     // 重绘后重新套用搜索高亮（SVG 是整体重建的）
     graphLayoutVersion++;
     refreshMinimap();
   }
@@ -1638,18 +1681,23 @@
 
   function fitGraph() {
     const cw = graphView.clientWidth, ch = graphView.clientHeight;
-    if (!cw || !ch || worldW <= 0) return;
+    // 用「实际可见节点的包围盒」计算缩放（drawGraph 已经把 docW/docH/docMinX/docMinY 算好），
+    // 这样 fitGraph 与 miniWorldParams 共用同一坐标系 —— 画布视口、缩略图高亮视野与文档实际边界
+    // 三者保持一致，避免出现「画布能看到最左的框、缩略图高亮视野却没框」之类的几何错位。
+    if (!cw || !ch || !docW || !docH) return;
     const pad = 56;
     // 以「高度」为适配基准，横向不强行铺满视口 —— 当内容比视口宽时，
     // 画布会超出视口、高亮框变窄，从而可用缩略图/拖拽左右平移
-    let s = (ch - pad) / worldH;
+    let s = (ch - pad) / docH;
     s = Math.max(0.2, Math.min(s, 1.6));
     graphScale = s;
-    const sw = worldW * s, sh = worldH * s;
-    // 横向：内容比视口宽则左对齐（可向右拖拽平移），否则居中
-    panX = sw <= cw ? (cw - sw) / 2 : 0;
-    // 纵向：内容比视口高则顶部对齐（可向下拖拽），否则居中
-    panY = sh <= ch ? (ch - sh) / 2 : 0;
+    const sw = docW * s, sh = docH * s;
+    // 横向：让「画布中心」对齐「文档中心」——即使文档比视口宽，文档中心也落在画布中央，
+    // 这样按钮缩放（以画布中心为锚点）时画布中心的世界坐标始终是文档中心，
+    // 缩略图 thumb 也始终保持在 minimap 中部，不会缩到 minimap 左上角。
+    panX = (cw - sw) / 2 - docMinX * s;
+    // 纵向：同样以文档中心为锚点对齐。
+    panY = (ch - sh) / 2 - docMinY * s;
     applyGraphTransform();
   }
 
@@ -1904,6 +1952,22 @@
         e.preventDefault();
         const key = g.getAttribute("data-key");
         if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
+        drawGraph();
+      });
+    });
+    // 数组节点字段截断处的「+N」单元格：点击切换该节点全部字段展开 / 折叠
+    graphSvg.querySelectorAll(".gmore-hit").forEach(function (r) {
+      r.addEventListener("pointerdown", function (e) {
+        e.stopPropagation();
+        e.preventDefault();
+        const id = r.getAttribute("data-id");
+        const node = graphNodes.find(function (n) { return n.id === id; });
+        if (!node) return;
+        // 用 path 作 key（节点每次 buildGraph 都会重建，对象引用会失效）
+        const key = node._pathKey || node.path.join(".");
+        if (expandedArrCols.has(key)) expandedArrCols.delete(key); else expandedArrCols.add(key);
+        // 完整重建：buildGraph 会按当前 expandedArrCols 决定 cols/rows，重新生成所有 nodes
+        buildGraph(currentData);
         drawGraph();
       });
     });
@@ -2456,7 +2520,7 @@
     renderMain(data);
     openInNavigator(data, "根");
     updatePanels();
-    if (searchBox.value.trim()) runSearch(searchBox.value); else clearSearch();
+    if (searchBox.value.trim()) runSearch(searchBox.value, true); else clearSearch();
   }
 
   /* ---------- drag to pan (output, both axes) ---------- */
@@ -2603,11 +2667,17 @@
       // 再加 ox/oy 居中偏移，使其与缩略图总览层共用同一世界坐标，与真实画布形状一一对应。
       let tw = vw * p.s, th = vh * p.s;
       let tx = worldToMiniX(vLeft, p), ty = worldToMiniY(vTop, p);
-      // 钳制到「世界范围带」内（letterbox 空白带为多出来的一轴，是真实无内容；高亮框不应进入该带）
-      tw = Math.max(6, Math.min(tw, p.renderedW));
-      th = Math.max(6, Math.min(th, p.renderedH));
-      tx = Math.max(p.ox, Math.min(tx, p.ox + p.renderedW - tw));
-      ty = Math.max(p.oy, Math.min(ty, p.oy + p.renderedH - th));
+      // thumb 严格表示真实视口：位置与大小都直接由 world→mini 映射得出，
+      // 画布中心在世界坐标处 ⇔ thumb 中心在 mini 坐标处，二者永远一一对应。
+      // 唯一约束：保底最小尺寸 6px（避免缩放到极小时 thumb 缩没、抓不住）。
+      // 不限制最大尺寸——当视口比文档大（放大）或画布拖到文档外时，thumb 本就该
+      // 超出文档矩形、由 .map-mini 的 overflow:hidden 裁掉，这正好反映「视野已覆盖/越过整图」。
+      // 之前对 tw/th 夹到 renderedW/renderedH 会造成 thumb 被「贴上边/贴左边」、
+      // 与画布真实视野错位（偏上/偏左）。现已去掉最大钳制，仅保留最小保底。
+      tw = Math.max(6, tw);
+      th = Math.max(6, th);
+      tx = worldToMiniX(vLeft, p);
+      ty = worldToMiniY(vTop, p);
       mapThumb.style.right = "auto"; mapThumb.style.left = tx + "px"; mapThumb.style.width = tw + "px";
       mapThumb.style.top = ty + "px"; mapThumb.style.height = th + "px";
       const pctX = Math.round((vLeft / p.cb.w) * 100), pctY = Math.round((vTop / p.cb.h) * 100);
@@ -2647,9 +2717,22 @@
     // 「当前元素」只在选中节点 / 字段后出现（× 关闭后同样隐藏，点画布节点重新打开；
     //   列表模式不受「未选中」限制）。缩略图导航独立于此面板，有数据即显示。
     const noSel = hasData && (selPanelClosed || (graphMode && !graphSelectedId));
+    const prevSelHidden = selPanel.classList.contains("hidden");
     selPanel.classList.toggle("hidden", !hasData || noSel);
     mapWin.style.display = (hasData && mapUserOpen) ? "" : "none";
     selPanel.style.height = selPanelH ? selPanelH + "px" : "";
+    // graph 模式下 .sel-panel 出现 / 隐藏会改变 graphView 的高度，导致画布中心的世界坐标
+    // 偏离文档中心，进而缩略图 thumb 与画布视口错位。这里在面板显隐切换时，按当前画布
+    // 中心的世界坐标重新计算 panX/panY，保持视口中心不动。
+    if (graphMode && graphSvg && hasData && prevSelHidden !== (!hasData || noSel)) {
+      const oldCh = graphSvg.getAttribute("height");
+      const newCh = graphView.clientHeight;
+      if (oldCh && +oldCh !== newCh && graphScale > 0) {
+        const cy = (-panY + (+oldCh) / 2) / graphScale;
+        panY = newCh / 2 - cy * graphScale;
+        applyGraphTransform();
+      }
+    }
     if (hasData && mapUserOpen) refreshMinimap();
   }
 
@@ -2744,6 +2827,7 @@
       refreshMinimap();
     }
     updatePanels();   // 关系图模式下未选中节点时，「当前元素」不出现
+    applySearchViewHighlights();   // 视图切换会重建 DOM，重新套用搜索高亮
   }
   btnModeList.addEventListener("click", function () { setMode(false); });
   btnModeGraph.addEventListener("click", function () { setMode(true); });
@@ -2783,35 +2867,134 @@
     if (graphMode) graphZoomStep(1 / 1.2); else setTreeFont(treeFont - 1);
   });
 
-  /* ---------- search (keys / values) ---------- */
+  /* ---------- search ----------
+     搜索源改为「左侧 JSON 原文」：不再查右侧渲染后的 DOM（graph 模式下 #output 为空，
+     必然 0 命中），也不受字段截断、折叠、节点数量上限影响，行为对齐浏览器 Ctrl+F：
+     全部命中高亮、当前命中滚动定位、Enter/Shift+Enter 前后跳转、Esc 关闭。 */
   const searchBox = document.getElementById("searchBox");
   const searchCount = document.getElementById("searchCount");
-  let searchHits = [];
+  const searchWrap = document.getElementById("searchWrap");
+  const SEARCH_CAP = 5000;               // 超大文本时限制高亮数量，避免卡死
+  let searchRanges = [];                 // [{from,to}] 编辑器内的字符偏移
+  let searchMarks = [];                  // 全部命中的 markText（当前项位置为 null）
+  let searchCurMark = null;              // 当前命中的 markText（橙色）
+  let searchCur = -1;
+
+  function clearSearchViewHighlights() {
+    document.querySelectorAll(".search-hit, .search-hit-svg").forEach(function (n) {
+      n.classList.remove("search-hit");
+      n.classList.remove("search-hit-svg");
+    });
+  }
   function clearSearch() {
-    searchHits.forEach(function (n) { n.classList.remove("search-hit"); });
-    searchHits = [];
+    searchMarks.forEach(function (m) { if (m) { try { m.clear(); } catch (e) {} } });
+    searchMarks = [];
+    if (searchCurMark) { try { searchCurMark.clear(); } catch (e) {} }
+    searchCurMark = null;
+    clearSearchViewHighlights();
+    searchRanges = [];
+    searchCur = -1;
     searchCount.textContent = "";
   }
-  function runSearch(q) {
-    clearSearch();
-    q = (q || "").trim().toLowerCase();
-    if (!q || currentData === undefined) return;
-    const targets = output.querySelectorAll(".key, .leaf");
-    targets.forEach(function (n) {
-      if (n.textContent.toLowerCase().indexOf(q) !== -1) {
-        n.classList.add("search-hit");
-        searchHits.push(n);
-      }
-    });
-    if (searchHits.length > 0) {
-      searchCount.textContent = "1/" + searchHits.length;
-      searchHits[0].scrollIntoView({ block: "center" });
-    } else {
-      searchCount.textContent = "0";
+  // 右侧视图的「可见文本」也高亮；列表视图顺带展开命中所在的折叠分支（搜到即可见）
+  function applySearchViewHighlights() {
+    const box = document.getElementById("searchBox");
+    const q = box ? box.value.trim() : "";
+    if (!q || appMode !== "json" || currentData === undefined) {
+      clearSearchViewHighlights();
+      return;
+    }
+    clearSearchViewHighlights();
+    const needle = q.toLowerCase();
+    const scope = graphMode ? document.getElementById("graphView") : output;
+    if (!scope) return;
+    scope.querySelectorAll(".key, .leaf, .jtable th, .gnode-title, .gnode-key, .gnode-val, .gnode-idx")
+      .forEach(function (n) {
+        if (n.textContent.toLowerCase().indexOf(needle) === -1) return;
+        n.classList.add(String(n.tagName).toLowerCase() === "text" ? "search-hit-svg" : "search-hit");
+      });
+    if (!graphMode) {
+      scope.querySelectorAll(".search-hit").forEach(function (n) {
+        let p = n.parentElement;
+        while (p && p !== scope) {
+          if (p.classList && p.classList.contains("branch") && p.classList.contains("collapsed")) {
+            p.classList.remove("collapsed");
+            const t = p.querySelector(".branch-head > .toggle");
+            if (t) t.textContent = "▾";
+          }
+          p = p.parentElement;
+        }
+      });
     }
   }
+  // 当前命中：编辑器滚动到该处 + 右侧视图定位（graph 居中到对应节点，列表滚到首个命中）
+  function centerSearchHitInView(hit) {
+    if (currentData === undefined || appMode !== "json") return;
+    const segs = findJsonPathAtOffset(editor.getValue(), hit.from);
+    if (graphMode) {
+      if (!segs || !graphRoot) return;
+      let node = findGraphNodeByPath(segs);
+      let depth = segs.length;
+      while (!node && depth > 0) { depth--; node = findGraphNodeByPath(segs.slice(0, depth)); }
+      if (node) centerOnNode(node);
+    } else {
+      const first = output.querySelector(".search-hit");
+      if (first && typeof first.scrollIntoView === "function") first.scrollIntoView({ block: "center" });
+    }
+  }
+  function focusSearchHit(idx, noScroll) {
+    if (!searchRanges.length) { searchCount.textContent = "0/0"; return; }
+    const total = searchRanges.length;
+    // 先把旧的「当前项」还原成普通命中高亮
+    if (searchCurMark) { try { searchCurMark.clear(); } catch (e) {} searchCurMark = null; }
+    if (searchCur >= 0 && !searchMarks[searchCur]) {
+      const prev = searchRanges[searchCur];
+      searchMarks[searchCur] = editor.markText(editor.posFromIndex(prev.from), editor.posFromIndex(prev.to), { className: "cm-search-hit" });
+    }
+    searchCur = ((idx % total) + total) % total;      // 循环跳转
+    const hit = searchRanges[searchCur];
+    if (searchMarks[searchCur]) { try { searchMarks[searchCur].clear(); } catch (e) {} searchMarks[searchCur] = null; }
+    const a = editor.posFromIndex(hit.from), b = editor.posFromIndex(hit.to);
+    searchCurMark = editor.markText(a, b, { className: "cm-search-cur" });
+    searchCount.textContent = (searchCur + 1) + "/" + total + (total >= SEARCH_CAP ? "+" : "");
+    if (!noScroll) {
+      editor.scrollIntoView({ from: a, to: b });
+      centerSearchHitInView(hit);
+    }
+  }
+  // silent=true：编辑内容变化后的重跑，只重建高亮，保持当前命中序位且不滚动，避免打断输入
+  function runSearch(q, silent) {
+    const keepIdx = silent ? Math.max(0, searchCur) : 0;
+    clearSearch();
+    q = (q || "").trim();
+    if (!q || appMode !== "json") return;
+    const text = editor.getValue();
+    if (!text) { searchCount.textContent = "0/0"; return; }
+    const hay = text.toLowerCase(), needle = q.toLowerCase();
+    let from = 0;
+    while (searchRanges.length < SEARCH_CAP) {
+      const at = hay.indexOf(needle, from);
+      if (at < 0) break;
+      searchRanges.push({ from: at, to: at + needle.length });
+      from = at + Math.max(1, needle.length);
+    }
+    searchMarks = searchRanges.map(function (h) {
+      return editor.markText(editor.posFromIndex(h.from), editor.posFromIndex(h.to), { className: "cm-search-hit" });
+    });
+    applySearchViewHighlights();
+    if (searchRanges.length) focusSearchHit(Math.min(keepIdx, searchRanges.length - 1), !!silent);
+    else searchCount.textContent = "0/0";
+  }
+  function stepSearch(delta) {
+    if (searchRanges.length) focusSearchHit(searchCur + delta);
+  }
   searchBox.addEventListener("input", function () { runSearch(this.value); });
-  const searchWrap = document.getElementById("searchWrap");
+  searchBox.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); stepSearch(e.shiftKey ? -1 : 1); }
+    else if (e.key === "Escape") { e.preventDefault(); searchWrap.classList.add("hidden"); clearSearch(); }
+  });
+  document.getElementById("btn-search-prev").addEventListener("click", function () { stepSearch(-1); searchBox.focus(); });
+  document.getElementById("btn-search-next").addEventListener("click", function () { stepSearch(1); searchBox.focus(); });
   document.getElementById("btn-search-toggle").addEventListener("click", function () {
     const hidden = searchWrap.classList.toggle("hidden");
     if (!hidden) {
@@ -2821,6 +3004,18 @@
       clearSearch();
     }
   });
+  // Ctrl/Cmd+F 直接唤起应用内搜索（选中文本时自动作为关键词），Esc 退出
+  document.addEventListener("keydown", function (e) {
+    if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "f" || appMode !== "json") return;
+    // 与浏览器一致：再次按 Ctrl/Cmd+F 会重新聚焦搜索框并全选关键词
+    e.preventDefault();
+    searchWrap.classList.remove("hidden");
+    const sel = editor.getSelection();
+    if (sel) { searchBox.value = sel; runSearch(sel); }
+    else if (searchBox.value.trim()) runSearch(searchBox.value);
+    searchBox.focus();
+    searchBox.select();
+  }, true);
   /* ---------- left / right splitter ---------- */
   const splitter = document.getElementById("splitter");
   const leftPane = document.querySelector(".pane.left");
